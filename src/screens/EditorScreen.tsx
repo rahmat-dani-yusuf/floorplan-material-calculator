@@ -1,0 +1,495 @@
+import React, { useMemo, useState } from 'react';
+import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import PlanCanvas from '../components/PlanCanvas';
+import Stepper from '../components/Stepper';
+import ChipGroup from '../components/ChipGroup';
+import { useWallStore, selectActiveWall } from '../store/wallStore';
+import { useProjectStore } from '../store/projectStore';
+import { confirm } from '../utils/confirm';
+import { useAuthStore } from '../store/authStore';
+import { keluar } from '../services/authService';
+import { BRICK_LABEL, DEFAULT_PINTU, DEFAULT_JENDELA, OPENING_LIMITS } from '../constants/materials';
+import type { BrickType, MortarRatio, Point } from '../types';
+import { C } from '../theme';
+import NamaProyekModal from '../components/NamaProyekModal';
+import TemplateModal from '../components/TemplateModal';
+
+const BRICKS = (Object.keys(BRICK_LABEL) as BrickType[]).map((k) => ({ value: k, label: BRICK_LABEL[k] }));
+const MORTARS: { value: MortarRatio; label: string }[] = [
+  { value: '1:4', label: '1:4 Standar' },
+  { value: '1:2', label: '1:2 Kedap Air' },
+];
+
+export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects }: { onCalculate: () => void; onOpenPrices?: () => void; onOpenProjects?: () => void }) {
+  const s = useWallStore();
+  const walls = s.walls;
+  const selectedId = s.selectedId;
+  const [warn, setWarn] = useState('');
+  const [warnColor, setWarnColor] = useState('#ffb4ab');
+  const [roomModal, setRoomModal] = useState(false);
+  const [roomShape, setRoomShape] = useState<'persegi' | 'L'>('persegi');
+  const [roomW, setRoomW] = useState('3');
+  const [roomL, setRoomL] = useState('3');
+  const saveCurrentAs = useProjectStore((s) => s.saveCurrentAs);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [defaultNama, setDefaultNama] = useState('Proyek ' + new Date().toLocaleDateString('id-ID'));
+  const [templateModal, setTemplateModal] = useState(false);
+  const [roomPreset, setRoomPreset] = useState('kamar');
+  const [roomCustomW, setRoomCustomW] = useState('3');
+  const [roomCustomL, setRoomCustomL] = useState('3');
+  const [roomSide, setRoomSide] = useState<'luar' | 'dalam'>('luar');
+  const [roomDoor, setRoomDoor] = useState(true);
+  const [roomOffset, setRoomOffset] = useState('0');
+  const [samakanPanjang, setSamakanPanjang] = useState(false);
+  const [roomCutW, setRoomCutW] = useState('2');
+  const [roomCutL, setRoomCutL] = useState('2');
+  const [fitTrigger, setFitTrigger] = useState(0);
+  const addRoom = useWallStore((s) => s.addRoom);
+  const loadPlan = useWallStore((s) => s.loadPlan);
+  const loadWalls = useWallStore((s) => s.loadWalls);
+  const setRooms = useWallStore((s) => s.setRooms);
+  const auth = useAuthStore();
+  const project = useProjectStore((s) => s.currentProjectId ? s.projects.find((p) => p.id === s.currentProjectId) : null);
+  const saveCurrent = useProjectStore((s) => s.saveCurrent);
+  const newProject = useProjectStore((s) => s.newProject);
+  const wall = selectActiveWall(s);
+
+  const tool = (label: string, onPress: () => void, enabled = true, danger = false) => (
+    <Pressable
+      onPress={onPress}
+      disabled={!enabled}
+      style={{
+        paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
+        backgroundColor: danger ? '#93000a55' : C.surface, opacity: enabled ? 1 : 0.4,
+      }}
+    >
+      <Text style={{ color: danger ? C.error : C.text, fontSize: 13 }}>{label}</Text>
+    </Pressable>
+  );
+
+  const summary = useMemo(() => {
+    const count = walls.length;
+    const total = walls.reduce((s, w) => s + w.length_meters, 0);
+    const gross = walls.reduce((s, w) => s + w.length_meters * w.height_meters, 0);
+    return { count, total, gross };
+  }, [walls]);
+
+  const wallSummary = useMemo(() => {
+    const gross = wall.length_meters * wall.height_meters;
+    const open = (wall.openings ?? []).reduce((sum, o) => sum + o.width_meters * o.height_meters * o.quantity, 0);
+    const net = Math.max(0, gross - open);
+    const over = open > gross + 0.001;
+    return { gross, open, net, over };
+  }, [wall]);
+
+  const isDefaultPlan = JSON.stringify(walls.map((w) => ({ id: w.id, name: w.name, p1: w.p1, p2: w.p2, length: w.length_meters }))) === JSON.stringify([
+    { id: 'w-1', name: 'W-01', p1: { x: 0, y: 4 }, p2: { x: 5, y: 4 }, length: 5 },
+    { id: 'w-2', name: 'W-02', p1: { x: 5, y: 4 }, p2: { x: 5, y: 0 }, length: 4 },
+    { id: 'w-3', name: 'W-03', p1: { x: 5, y: 0 }, p2: { x: 0, y: 0 }, length: 5 },
+    { id: 'w-4', name: 'W-04', p1: { x: 0, y: 0 }, p2: { x: 0, y: 4 }, length: 4 },
+  ]);
+
+  const handleTemplateSelect = (template: string) => {
+    if (!isDefaultPlan) {
+      confirm('Ganti denah?', 'Denah saat ini akan diganti dengan template.', () => applyTemplate(template));
+    } else {
+      applyTemplate(template);
+    }
+  };
+
+  const applyTemplate = (template: string) => {
+    setTemplateModal(false);
+    const h = 3.2;
+    const brick = 'bata_merah' as const;
+    const mortar = '1:4' as const;
+    const p = DEFAULT_PINTU;
+    const j = DEFAULT_JENDELA;
+    if (template === '48') {
+      loadWalls([
+        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 8, y: 0 }, length_meters: 8, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 2, swing: 1 }] },
+        { id: 'w-2', name: 'W-02', p1: { x: 8, y: 0 }, p2: { x: 8, y: 6 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-3', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-3', name: 'W-03', p1: { x: 8, y: 6 }, p2: { x: 0, y: 6 }, length_meters: 8, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-5', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }, { id: 'o-6', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 7, swing: 1 }] },
+        { id: 'w-4', name: 'W-04', p1: { x: 0, y: 6 }, p2: { x: 0, y: 0 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-7', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-8', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-5', name: 'W-05', p1: { x: 0, y: 3 }, p2: { x: 8, y: 3 }, length_meters: 8, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-9', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-10', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }, { id: 'o-11', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 7, swing: 1 }] },
+        { id: 'w-6', name: 'W-06', p1: { x: 4, y: 0 }, p2: { x: 4, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-12', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-7', name: 'W-07', p1: { x: 3, y: 3 }, p2: { x: 3, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-13', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-8', name: 'W-08', p1: { x: 6, y: 3 }, p2: { x: 6, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-14', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+      ] as any);
+      setRooms([
+        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 2, y: 1.5 } },
+        { id: 'r-2', name: 'Dapur', seed: { x: 6, y: 1.5 } },
+        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 4.5 } },
+        { id: 'r-4', name: 'Kamar 2', seed: { x: 4.5, y: 4.5 } },
+        { id: 'r-5', name: 'Kamar Mandi', seed: { x: 7, y: 4.5 } },
+      ]);
+    } else if (template === '36') {
+      loadWalls([
+        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 6, y: 0 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 2, swing: 1 }] },
+        { id: 'w-2', name: 'W-02', p1: { x: 6, y: 0 }, p2: { x: 6, y: 6 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-3', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-3', name: 'W-03', p1: { x: 6, y: 6 }, p2: { x: 0, y: 6 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-5', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-4', name: 'W-04', p1: { x: 0, y: 6 }, p2: { x: 0, y: 0 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-6', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-7', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-5', name: 'W-05', p1: { x: 0, y: 3 }, p2: { x: 6, y: 3 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-8', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-9', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
+        { id: 'w-6', name: 'W-06', p1: { x: 3, y: 0 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-10', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-7', name: 'W-07', p1: { x: 3, y: 3 }, p2: { x: 3, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-11', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+      ] as any);
+      setRooms([
+        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 1.5, y: 1.5 } },
+        { id: 'r-2', name: 'Dapur', seed: { x: 4.5, y: 1.5 } },
+        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 4.5 } },
+        { id: 'r-4', name: 'Kamar 2', seed: { x: 4.5, y: 4.5 } },
+      ]);
+    }
+    setFitTrigger((v) => v + 1);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
+      {/* header */}
+      <View style={{ paddingTop: 48, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: '#131b2e' }}>
+        <Text style={{ color: C.text, fontSize: 18, fontWeight: '600' }}>Edit Dinding</Text>
+        <Text style={{ color: C.secondary, fontSize: 12 }}>{project ? project.name : 'Proyek Baru'}</Text>
+        <Text numberOfLines={1} style={{ color: C.tertiary, fontSize: 11 }}>{auth.user ? (auth.user.nama || auth.user.email || 'Pengguna') : (auth.isGuest ? 'Tamu' : '')}</Text>
+        <Pressable onPress={async () => {
+          const projectStore = useProjectStore.getState();
+          await projectStore.flushPendingUploads();
+          const status = useProjectStore.getState().syncStatus;
+          if (status === 'galat') {
+            confirm('Ada proyek yang belum tersinkron dan akan hilang jika keluar. Tetap keluar?', '', () => { auth.logout(); keluar(); });
+          } else {
+            auth.logout(); keluar();
+          }
+        }} style={{ position: 'absolute', right: 16, top: 48, padding: 6 }}>
+          <Text style={{ color: C.error, fontSize: 12, fontWeight: '600' }}>Keluar</Text>
+        </Pressable>
+        <Text style={{ color: C.secondary, fontSize: 12 }}>Geser titik oranye untuk ubah panjang • Ketuk dinding untuk memilih</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          {tool('↶ Undo', s.undo, s.past.length > 0)}
+          {tool('↷ Redo', s.redo, s.future.length > 0)}
+          {tool('Reset', () => confirm('Reset Denah', 'Semua dinding akan dikembalikan ke kondisi awal?', () => s.reset()), true, true)}
+          {onOpenPrices ? tool('Harga', onOpenPrices, true) : null}
+          {onOpenProjects ? tool('Proyek', onOpenProjects, true) : null}
+          {tool('Template', () => setTemplateModal(true), true)}
+          {tool('Simpan', () => { setDefaultNama('Proyek ' + new Date().toLocaleDateString('id-ID')); setModalVisible(true); }, true)}
+        </View>
+      </View>
+
+      <PlanCanvas fitTrigger={fitTrigger} />
+
+      {/* panel parameter */}
+      <ScrollView
+        style={{ flex: 1, backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
+        contentContainerStyle={{ padding: 16, gap: 12 }}
+      >
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+          <Text style={{ color: C.secondary, fontSize: 11 }}>{summary.count} dinding</Text>
+          <Text style={{ color: C.secondary, fontSize: 11 }}>• Total panjang {summary.total.toFixed(2)} m</Text>
+          <Text style={{ color: C.secondary, fontSize: 11 }}>• Luas kotor {summary.gross.toFixed(2)} m²</Text>
+        </View>
+
+        <Pressable onPress={() => {
+          const sel = walls.find((w) => w.id === selectedId);
+          if (!sel) {
+            Alert.alert('Ketuk dinding dulu', 'Ketuk dinding dulu untuk menempelkan ruangan');
+            return;
+          }
+          setRoomModal(true);
+        }} style={{ backgroundColor: C.primary, borderRadius: 10, padding: 10, alignItems: 'center', marginBottom: 4 }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>+ Ruangan</Text>
+        </Pressable>
+
+        <Pressable onPress={() => s.toggleDedupe()} style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, backgroundColor: s.dedupeOverlap ? '#f97316' : C.surface, marginLeft: 4 }}>
+          <Text style={{ color: s.dedupeOverlap ? '#fff' : C.text, fontSize: 10, fontWeight: '600' }}>{s.dedupeOverlap ? 'Hitung sekali' : 'Hitung semua'}</Text>
+        </Pressable>
+
+        {/* tab dinding */}
+        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {walls.map((w) => (
+            <Pressable
+              key={w.id}
+              onPress={() => s.selectWall(w.id)}
+              style={{
+                paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8,
+                backgroundColor: w.id === selectedId ? C.primary : C.surface,
+              }}
+            >
+              <Text style={{ color: w.id === selectedId ? '#fff' : C.text, fontSize: 12, fontWeight: w.id === selectedId ? '700' : '400' }}>
+                {w.name}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            onPress={s.addWall}
+            style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: C.surfaceHighest }}
+          >
+            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>+ Gambar Dinding (seret di kanvas)</Text>
+          </Pressable>
+          {walls.length > 1 && (
+            <Pressable
+              onPress={() => s.removeWall(selectedId)}
+              style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#93000a55' }}
+            >
+              <Text style={{ color: C.error, fontSize: 12, fontWeight: '700' }}>Hapus Dinding Ini</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Stepper label="Panjang Dinding" value={wall.length_meters} onChange={s.stepLength} />
+          <Stepper label="Tinggi Dinding" value={wall.height_meters} onChange={s.stepHeight} />
+        </View>
+        <ChipGroup label="Jenis Bata" options={BRICKS} selected={wall.brick_type} onSelect={s.setBrickType} />
+        <ChipGroup label="Tipe Adukan" options={MORTARS} selected={wall.mortar_ratio} onSelect={s.setMortarRatio} />
+
+        {/* Bukaan */}
+        <View style={{ marginTop: 4 }}>
+          <Text style={{ color: C.textDim, fontSize: 12, marginBottom: 6 }}>Pintu & Jendela</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable
+              onPress={() => {
+                const gross = wall.length_meters * wall.height_meters;
+                const current = (wall.openings ?? []).reduce((sum, o) => sum + o.width_meters * o.height_meters * o.quantity, 0);
+                const added = DEFAULT_PINTU.width_meters * DEFAULT_PINTU.height_meters;
+                if (current + added > gross + 0.001) {
+                  setWarn('Luas bukaan melebihi luas dinding');
+                  setWarnColor('#ffb4ab');
+                  return;
+                }
+                setWarn('');
+                const ok = s.addOpening(wall.id, 'pintu');
+                if (!ok) Alert.alert('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
+              }}
+              style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
+            >
+              <Text style={{ color: C.text, fontWeight: '700', fontSize: 12 }}>+ Pintu</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                const gross = wall.length_meters * wall.height_meters;
+                const current = (wall.openings ?? []).reduce((sum, o) => sum + o.width_meters * o.height_meters * o.quantity, 0);
+                const added = DEFAULT_JENDELA.width_meters * DEFAULT_JENDELA.height_meters;
+                if (current + added > gross + 0.001) {
+                  setWarn('Luas bukaan melebihi luas dinding');
+                  setWarnColor('#ffb4ab');
+                  return;
+                }
+                setWarn('');
+                const ok = s.addOpening(wall.id, 'jendela');
+                if (!ok) Alert.alert('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
+              }}
+              style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
+            >
+              <Text style={{ color: C.text, fontWeight: '700', fontSize: 12 }}>+ Jendela</Text>
+            </Pressable>
+          </View>
+
+          {(wall.openings ?? []).map((o) => (
+            <View key={o.id} style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10, marginTop: 6 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={{ color: C.text, fontWeight: '700', fontSize: 12 }}>{o.type === 'pintu' ? 'Pintu' : 'Jendela'}</Text>
+                <Pressable onPress={() => s.removeOpening(wall.id, o.id)}>
+                  <Text style={{ color: C.error, fontSize: 12, fontWeight: '700' }}>Hapus</Text>
+                </Pressable>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.textDim, fontSize: 10 }}>Lebar (m)</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { width_meters: Math.round(Math.max(OPENING_LIMITS.min, o.width_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Text style={{ color: C.text, fontWeight: '700' }}>{o.width_meters.toFixed(1)}</Text>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { width_meters: Math.round(Math.min(OPENING_LIMITS.max, o.width_meters + 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.textDim, fontSize: 10 }}>Tinggi (m)</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { height_meters: Math.round(Math.max(OPENING_LIMITS.min, o.height_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Text style={{ color: C.text, fontWeight: '700' }}>{o.height_meters.toFixed(1)}</Text>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { height_meters: Math.round(Math.min(OPENING_LIMITS.max, o.height_meters + 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.textDim, fontSize: 10 }}>Posisi (m)</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.max(0.1, (o.offset_meters || 0) - 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Text style={{ color: C.text, fontWeight: '700' }}>{(o.offset_meters || 0).toFixed(2)}</Text>
+                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.min(wall.length_meters - 0.1, (o.offset_meters || 0) + 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
+                  </View>
+                </View>
+                {o.type === 'pintu' && (
+                  <Pressable onPress={() => s.flipOpening(wall.id, o.id)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6, marginTop: 2 }}>
+                    <Text style={{ color: C.text, fontSize: 11 }}>Balik Arah</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          ))}
+
+          {/* ringkasan luas */}
+          <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10, marginTop: 6 }}>
+            <Text style={{ color: C.text, fontSize: 12, fontWeight: '600' }}>
+              Luas kotor {wallSummary.gross.toFixed(2)} m² − bukaan {wallSummary.open.toFixed(2)} m² = netto {wallSummary.net.toFixed(2)} m²
+            </Text>
+          </View>
+
+          {wallSummary.over && (warn ? (
+            <Text style={{ color: warnColor, fontSize: 12, fontWeight: '600', marginTop: 4 }}>{warn}</Text>
+          ) : (
+            <Text style={{ color: '#ffb95f', fontSize: 12, fontWeight: '600', marginTop: 4 }}>Luas bukaan melebihi luas dinding</Text>
+          ))}
+        </View>
+
+        <Pressable
+          onPress={onCalculate}
+          style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 }}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Hitung Material & RAB →</Text>
+        </Pressable>
+      </ScrollView>
+
+      <Modal visible={roomModal} transparent animationType="slide" onRequestClose={() => setRoomModal(false)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <View style={{ backgroundColor: C.surface, borderRadius: 16, padding: 20, width: '100%', maxWidth: 380, gap: 10 }}>
+            <Text style={{ color: C.text, fontSize: 18, fontWeight: '700' }}>Tambah Ruangan</Text>
+            {!selectedId ? (
+              <Text style={{ color: C.error }}>Ketuk dinding dulu untuk menempelkan ruangan</Text>
+            ) : (
+              <>
+                <Text style={{ color: C.secondary, fontSize: 12 }}>Dinding terpilih: {wall?.name || '—'}</Text>
+                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                  {[
+                    { key: 'kamar', label: 'Kamar Tidur 3×3' },
+                    { key: 'mandi', label: 'Kamar Mandi 2×2' },
+                    { key: 'dapur', label: 'Dapur 3×3' },
+                    { key: 'tamu', label: 'Ruang Tamu 4×3' },
+                    { key: 'garasi', label: 'Garasi 3×6' },
+                    { key: 'custom', label: 'Kustom' },
+                  ].map((opt) => (
+                    <Pressable key={opt.key} onPress={() => setRoomPreset(opt.key)} style={{ padding: 6, borderRadius: 8, backgroundColor: roomPreset === opt.key ? C.primary : C.surfaceHighest, flex: 1 }}>
+                      <Text style={{ color: roomPreset === opt.key ? '#fff' : C.text, fontSize: 11, textAlign: 'center' }}>{opt.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                {roomPreset === 'custom' && (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: C.secondary, fontSize: 11 }}>Lebar (m)</Text>
+                      <TextInput value={roomCustomW} onChangeText={setRoomCustomW} keyboardType="decimal-pad" style={{ backgroundColor: C.bg, borderRadius: 8, padding: 8, color: C.text }} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: C.secondary, fontSize: 11 }}>Panjang (m)</Text>
+                      <TextInput value={roomCustomL} onChangeText={setRoomCustomL} keyboardType="decimal-pad" style={{ backgroundColor: C.bg, borderRadius: 8, padding: 8, color: C.text }} />
+                    </View>
+                  </View>
+                )}
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <Text style={{ color: C.secondary, fontSize: 11 }}>Sisi:</Text>
+                  <Pressable onPress={() => setRoomSide('luar')} style={{ padding: 6, borderRadius: 6, backgroundColor: roomSide === 'luar' ? C.primary : C.surfaceHighest, flex: 1 }}><Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>{roomSide === 'luar' ? 'Luar' : 'Luar'}</Text></Pressable>
+                  <Pressable onPress={() => setRoomSide('dalam')} style={{ padding: 6, borderRadius: 6, backgroundColor: roomSide === 'dalam' ? C.primary : C.surfaceHighest, flex: 1 }}><Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>{roomSide === 'dalam' ? 'Dalam' : 'Dalam'}</Text></Pressable>
+                  <Pressable onPress={() => setRoomSide(roomSide === 'luar' ? 'dalam' : 'luar')} style={{ padding: 6, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 11 }}>Balik Sisi</Text></Pressable>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                  <Text style={{ color: C.secondary, fontSize: 10 }}>Geser (m):</Text>
+                  <TextInput value={roomOffset} onChangeText={setRoomOffset} keyboardType="decimal-pad" style={{ width: 60, backgroundColor: C.bg, borderRadius: 6, padding: 4, color: C.text, fontSize: 11 }} />
+                  <Pressable onPress={() => setRoomOffset('0')} style={{ padding: 4, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 10 }}>Awal</Text></Pressable>
+                  <Pressable onPress={() => { const wlen = (wall ? Math.hypot(wall.p2.x - wall.p1.x, wall.p2.y - wall.p1.y) : 0); const shared = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3); const mid = Math.max(0, (wlen - shared) / 2); setRoomOffset(String(Math.round(mid * 100) / 100)); }} style={{ padding: 4, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 10 }}>Tengah</Text></Pressable>
+                  <Pressable onPress={() => { const wlen = (wall ? Math.hypot(wall.p2.x - wall.p1.x, wall.p2.y - wall.p1.y) : 0); const shared = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3); const end = Math.max(0, wlen - shared); setRoomOffset(String(Math.round(end * 100) / 100)); }} style={{ padding: 4, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 10 }}>Akhir</Text></Pressable>
+                </View>
+                <Pressable onPress={() => { if (roomPreset !== 'custom') setSamakanPanjang(false); else setSamakanPanjang(v => !v); }} disabled={roomPreset !== 'custom'} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8, opacity: roomPreset === 'custom' ? 1 : 0.6 }}>
+                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: samakanPanjang ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{samakanPanjang && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+                  <Text style={{ color: C.text, fontSize: 11 }}>{roomPreset === 'custom' ? 'Samakan dengan panjang dinding' : 'Samakan (hanya Kustom)'}</Text>
+                </Pressable>
+                <Pressable onPress={() => setRoomDoor((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8 }}>
+                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: roomDoor ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{roomDoor && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+                  <Text style={{ color: C.text, fontSize: 11 }}>Beri pintu di dinding bersama</Text>
+                </Pressable>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                  <Pressable onPress={() => setRoomModal(false)} style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: C.surfaceHighest, alignItems: 'center' }}>
+                    <Text style={{ color: C.text, fontWeight: '600' }}>Batal</Text>
+                  </Pressable>
+                  <Pressable onPress={() => {
+                    const w = wall;
+                    if (!w) { Alert.alert('Pilih dinding', 'Pilih dinding terlebih dahulu'); return; }
+                    let depth = 3;
+                    if (roomPreset === 'kamar') depth = 3;
+                    else if (roomPreset === 'mandi') depth = 2;
+                    else if (roomPreset === 'dapur') depth = 3;
+                    else if (roomPreset === 'tamu') depth = 3;
+                    else if (roomPreset === 'garasi') depth = 6;
+                    else if (roomPreset === 'custom') depth = parseFloat(roomCustomL) || 3;
+                    const wlen = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y) || 1;
+                    let sharedLen = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3);
+                    const offset = parseFloat(roomOffset) || 0;
+                    if (offset < -0.01 || offset + sharedLen > wlen + 0.01) {
+                      Alert.alert('Posisi tidak valid', 'Ruangan melewati ujung dinding');
+                      return;
+                    }
+                    if (offset < 0) { setRoomOffset('0'); return; }
+                    if (offset + sharedLen > wlen) { setRoomOffset(String(Math.round(Math.max(0, wlen - sharedLen) * 100) / 100)); return; }
+                    const dx = w.p2.x - w.p1.x;
+                    const dy = w.p2.y - w.p1.y;
+                    const ux = dx / wlen, uy = dy / wlen;
+                    const pA = { x: w.p1.x + ux * offset, y: w.p1.y + uy * offset };
+                    const pB = { x: pA.x + ux * sharedLen, y: pA.y + uy * sharedLen };
+                    const nx = -uy, ny = ux;
+                    const perp = roomSide === 'luar' ? { x: nx, y: ny } : { x: -nx, y: -ny };
+                    const pC = { x: pB.x + perp.x * depth, y: pB.y + perp.y * depth };
+                    const pD = { x: pA.x + perp.x * depth, y: pA.y + perp.y * depth };
+                    const newWalls = [
+                      { ...w, id: `w-${Date.now()}-s`, name: 'W-NEW', p1: pB, p2: pC, length_meters: depth, height_meters: w.height_meters, brick_type: w.brick_type, mortar_ratio: w.mortar_ratio, openings: [] },
+                      { ...w, id: `w-${Date.now()}-b`, name: 'W-NEW', p1: pC, p2: pD, length_meters: sharedLen, height_meters: w.height_meters, brick_type: w.brick_type, mortar_ratio: w.mortar_ratio, openings: [] },
+                      { ...w, id: `w-${Date.now()}-d`, name: 'W-NEW', p1: pD, p2: pA, length_meters: depth, height_meters: w.height_meters, brick_type: w.brick_type, mortar_ratio: w.mortar_ratio, openings: [] },
+                    ];
+                    const existingPoints: Point[] = [];
+                    for (const ww of walls) { existingPoints.push(ww.p1, ww.p2); }
+                    const snap = (pt: Point) => {
+                      for (const ep of existingPoints) {
+                        if (Math.hypot(pt.x - ep.x, pt.y - ep.y) < 0.001) return ep;
+                      }
+                      return pt;
+                    };
+                    const sA = snap(pA); const sB = snap(pB); const sC = snap(pC); const sD = snap(pD);
+                    newWalls[0].p1 = sB; newWalls[0].p2 = sC; newWalls[0].length_meters = Math.hypot(sC.x - sB.x, sC.y - sB.y);
+                    newWalls[1].p1 = sC; newWalls[1].p2 = sD; newWalls[1].length_meters = Math.hypot(sD.x - sC.x, sD.y - sC.y);
+                    newWalls[2].p1 = sD; newWalls[2].p2 = sA; newWalls[2].length_meters = Math.hypot(sA.x - sD.x, sA.y - sD.y);
+                    newWalls.forEach((nw) => { nw.id = `w-${Date.now()}-${Math.random().toString(36).slice(2)}`; });
+                    const maxNum = Math.max(...walls.map((w) => { const m = w.name.match(/W-(\d+)/); return m ? parseInt(m[1], 10) : 0; }), 0);
+                    newWalls.forEach((nw, i) => { nw.name = `W-${String(maxNum + 1 + i).padStart(2, '0')}`; });
+                    loadWalls([...walls, ...newWalls]);
+                    if (roomDoor) s.addOpening(w.id, 'pintu');
+                    const roomName = roomPreset === 'kamar' ? 'Kamar Tidur' : roomPreset === 'mandi' ? 'Kamar Mandi' : roomPreset === 'dapur' ? 'Dapur' : roomPreset === 'tamu' ? 'Ruang Tamu' : roomPreset === 'garasi' ? 'Garasi' : 'Ruangan';
+                    const seed = { x: (sA.x + sB.x + sC.x + sD.x) / 4, y: (sA.y + sB.y + sC.y + sD.y) / 4 };
+                    s.setRooms([...s.rooms, { id: `r-${Date.now()}`, name: roomName, seed }]);
+                    setFitTrigger((v) => v + 1);
+                    setRoomModal(false);
+                  }} style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: C.primary, alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: '600' }}>Tambahkan</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+        <TemplateModal visible={templateModal} onSelect={handleTemplateSelect} onBatal={() => setTemplateModal(false)} />
+
+        <NamaProyekModal
+          visible={modalVisible}
+          defaultName={defaultNama}
+          onSimpan={(nama: string) => {
+            setModalVisible(false);
+            try {
+              saveCurrentAs(nama);
+              Alert.alert('Proyek tersimpan', `"${nama}" disimpan.`);
+            } catch (e: any) {
+              const code = e?.code || e?.message || e;
+              console.log('[Firestore error]', code);
+              Alert.alert('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan proyek.'));
+            }
+          }}
+          onBatal={() => setModalVisible(false)}
+        />
+
+    </View>
+  );
+}
