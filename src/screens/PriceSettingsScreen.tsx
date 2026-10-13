@@ -4,17 +4,20 @@ import {
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { usePriceStore } from '../store/priceStore';
+import { useAuthStore } from '../store/authStore';
 import { DEFAULT_PRICES } from '../constants/materials';
 import { C } from '../theme';
 import type { BrickType, UnitPrices } from '../types';
 
 const formatRp = (n: number) => 'Rp ' + n.toLocaleString('id-ID');
 
-export default function PriceSettingsScreen({ onBack, onBackFrom }: { onBack: () => void; onBackFrom?: 'editor' | 'result' }) {
+export default function PriceSettingsScreen({ onBack, onBackFrom, onOpenAdmin }: { onBack: () => void; onBackFrom?: 'editor' | 'result'; onOpenAdmin?: () => void }) {
   const prices = usePriceStore((s) => s.prices);
   const setBrickPrice = usePriceStore((s) => s.setBrickPrice);
   const setPrice = usePriceStore((s) => s.setPrice);
   const resetPrices = usePriceStore((s) => s.resetPrices);
+  const pakaiHargaPasar = usePriceStore((s) => s.pakaiHargaPasar);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
 
   const [raw, setRaw] = useState<Record<string, string>>({
     bata_merah: String(prices.bata.bata_merah),
@@ -72,6 +75,27 @@ export default function PriceSettingsScreen({ onBack, onBackFrom }: { onBack: ()
     ]);
   };
 
+  const handlePakaiPasar = async () => {
+    try {
+      await pakaiHargaPasar();
+      setRaw((prev) => {
+        const mp = usePriceStore.getState().prices;
+        return {
+          ...prev,
+          bata_merah: String(mp.bata.bata_merah),
+          hebel: String(mp.bata.hebel),
+          batako: String(mp.bata.batako),
+          semen_40kg: String(mp.semen_40kg),
+          pasir_m3: String(mp.pasir_m3),
+          cat_dasar_liter: String(mp.cat_dasar_liter),
+          cat_penutup_liter: String(mp.cat_penutup_liter),
+        };
+      });
+    } catch (e: any) {
+      Alert.alert('Gagal', 'Tidak dapat mengambil harga pasar saat ini.');
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -106,6 +130,22 @@ export default function PriceSettingsScreen({ onBack, onBackFrom }: { onBack: ()
               </View>
             </View>
           ))}
+
+          {isAdmin && onOpenAdmin ? (
+            <Pressable
+              onPress={onOpenAdmin}
+              style={{ backgroundColor: C.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Admin: Harga Pasar</Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable
+            onPress={handlePakaiPasar}
+            style={{ backgroundColor: C.surface, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: C.primary }}
+          >
+            <Text style={{ color: C.primary, fontWeight: '700', fontSize: 13 }}>Pakai harga pasar</Text>
+          </Pressable>
 
           <Pressable
             onPress={confirmReset}

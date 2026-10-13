@@ -7,6 +7,7 @@ import LoginScreen from './src/screens/LoginScreen';
 import EditorScreen from './src/screens/EditorScreen';
 import ResultScreen from './src/screens/ResultScreen';
 import PriceSettingsScreen from './src/screens/PriceSettingsScreen';
+import AdminPriceScreen from './src/screens/AdminPriceScreen';
 import { useProjectStore } from './src/store/projectStore';
 import ProjectsScreen from './src/screens/ProjectsScreen';
 
@@ -14,7 +15,7 @@ export default function App() {
   useEffect(() => { initAuthListener(); }, []);
   const hasHydrated = useAuthHydrated();
   const auth = useAuthStore();
-  const [screen, setScreen] = React.useState<'editor' | 'result' | 'prices' | 'projects'>('editor');
+  const [screen, setScreen] = React.useState<'editor' | 'result' | 'prices' | 'adminPrices' | 'projects'>('editor');
   const [fromScreen, setFromScreen] = React.useState<'editor' | 'result'>('editor');
 
   if (!hasHydrated) {
@@ -32,6 +33,8 @@ export default function App() {
   const openPrices = (origin: 'editor' | 'result') => { setFromScreen(origin); setScreen('prices'); };
   const openProjects = (origin: 'editor' | 'result') => { setFromScreen(origin); setScreen('projects'); };
   const goBackToOrigin = () => setScreen(fromScreen);
+  const openAdminPrices = () => setScreen('adminPrices');
+  const backToPrices = () => setScreen('prices');
   const handleSelectProject = (id: string) => {
     useProjectStore.getState().openProject(id);
     setScreen('editor');
@@ -45,7 +48,9 @@ export default function App() {
       ) : screen === 'result' ? (
         <ResultScreen onBack={() => setScreen('editor')} onOpenPrices={() => openPrices('result')} onOpenProjects={() => openProjects('result')} />
       ) : screen === 'prices' ? (
-        <PriceSettingsScreen onBack={goBackToOrigin} />
+        <PriceSettingsScreen onBack={goBackToOrigin} onOpenAdmin={openAdminPrices} />
+      ) : screen === 'adminPrices' ? (
+        <AdminPriceScreen onBack={backToPrices} />
       ) : (
         <ProjectsScreen onBack={goBackToOrigin} onSelect={handleSelectProject} />
       )}
