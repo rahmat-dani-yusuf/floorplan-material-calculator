@@ -418,13 +418,30 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                     else if (roomPreset === 'custom') depth = parseFloat(roomCustomL) || 3;
                     const wlen = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y) || 1;
                     let sharedLen = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3);
+                    const EPS = 0.01;
                     const offset = parseFloat(roomOffset) || 0;
-                    if (offset < -0.01 || offset + sharedLen > wlen + 0.01) {
-                      Alert.alert('Posisi tidak valid', 'Ruangan melewati ujung dinding');
+                    // Samakan toleransi (EPS): bila lebar ruangan hanya sedikit melebihi panjang
+                    // dinding (dalam EPS), clamp ke panjang dinding alih-alih menolak — mis.
+                    // ruangan 8×5 pas di dinding 8 m yang karena pembulatan terbaca 7.999 m.
+                    if (sharedLen > wlen && sharedLen <= wlen + EPS) {
+                      console.log('[tambahRuangan] clamp sharedLen ke wlen', { wall: w.name, from: sharedLen, to: wlen });
+                      sharedLen = wlen;
+                    }
+                    const lebarTxt = sharedLen.toFixed(2);
+                    const dindingTxt = wlen.toFixed(2);
+                    // Penolakan: ruangan melewati ujung dinding atau offset geser terlalu negatif (toleransi EPS).
+                    if (offset < -EPS || offset + sharedLen > wlen + EPS) {
+                      console.log('[tambahRuangan] DITOLAK: melewati ujung dinding', { wall: w.name, wlen, sharedLen, offset, EPS });
+                      Alert.alert('Posisi tidak valid', `Ruangan (${lebarTxt} m) melewati ujung dinding ${w.name} (${dindingTxt} m). Kurangi lebar atau geser posisi.`);
                       return;
                     }
-                    if (offset < 0) { setRoomOffset('0'); return; }
-                    if (offset + sharedLen > wlen) { setRoomOffset(String(Math.round(Math.max(0, wlen - sharedLen) * 100) / 100)); return; }
+                    // Offset geser negatif kecil (dalam EPS): clamp ke 0 alih-alih menolak.
+                    if (offset < 0) {
+                      console.log('[tambahRuangan] clamp offset ke 0', { wall: w.name, offset });
+                      setRoomOffset('0');
+                      Alert.alert('Posisi tidak valid', `Offset geser tidak boleh negatif. Diatur ke 0 untuk dinding ${w.name}.`);
+                      return;
+                    }
                     const dx = w.p2.x - w.p1.x;
                     const dy = w.p2.y - w.p1.y;
                     const ux = dx / wlen, uy = dy / wlen;
@@ -455,7 +472,10 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                     const maxNum = Math.max(...walls.map((w) => { const m = w.name.match(/W-(\d+)/); return m ? parseInt(m[1], 10) : 0; }), 0);
                     newWalls.forEach((nw, i) => { nw.name = `W-${String(maxNum + 1 + i).padStart(2, '0')}`; });
                     loadWalls([...walls, ...newWalls]);
-                    if (roomDoor) s.addOpening(w.id, 'pintu');
+                    if (roomDoor) {
+                      const doorOk = s.addOpening(w.id, 'pintu');
+                      if (!doorOk) console.log('[tambahRuangan] pintu di dinding bersama gagal dibuat', { wall: w.name, id: w.id });
+                    }
                     const roomName = roomPreset === 'kamar' ? 'Kamar Tidur' : roomPreset === 'mandi' ? 'Kamar Mandi' : roomPreset === 'dapur' ? 'Dapur' : roomPreset === 'tamu' ? 'Ruang Tamu' : roomPreset === 'garasi' ? 'Garasi' : 'Ruangan';
                     const seed = { x: (sA.x + sB.x + sC.x + sD.x) / 4, y: (sA.y + sB.y + sC.y + sD.y) / 4 };
                     s.setRooms([...s.rooms, { id: `r-${Date.now()}`, name: roomName, seed }]);

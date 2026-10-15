@@ -28,4 +28,4 @@ export const auth = (() => {
   return initializeAuth(app, { persistence: firebasePersistence as any });
 })();
 
-export const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+export const db = initializeFirestore(app, { experimentalForceLongPolling: true });

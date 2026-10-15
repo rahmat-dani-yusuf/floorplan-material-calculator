@@ -37,15 +37,31 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
   const [dragVertexPoint, setDragVertexPoint] = useState<Point | null>(null);
   const [dragVertexWallId, setDragVertexWallId] = useState<string | null>(null);
   const [snapTarget, setSnapTarget] = useState<Point | null>(null);
-  const [panStart, setPanStart] = useState<Point>({ x: 0, y: 0 });
-  const [panOffsetStart, setPanOffsetStart] = useState<Point>({ x: 0, y: 0 });
+  // panStart/panOffsetStart + ref cermin state. PanResponder dibuat sekali (stabil)
+  // dan membaca nilai terbaru lewat ref, jadi tidak dibuat ulang di tengah gesture.
+  const panStartRef = useRef<Point>({ x: 0, y: 0 });
+  const panOffsetStartRef = useRef<Point>({ x: 0, y: 0 });
+  const offsetRef = useRef(offset);
+  const scaleRef = useRef(scale);
+  const modeRef = useRef(mode);
+  const toolRef = useRef(tool);
+  const snapGridRef = useRef(snapGrid);
+  const snapOrthoRef = useRef(snapOrtho);
+  const magnetOnRef = useRef(magnetOn);
+  const wallsRef = useRef(walls);
+  const prestartRef = useRef(prestart);
+  const preendRef = useRef(preend);
+  const dragVertexPointRef = useRef(dragVertexPoint);
+  const dragVertexWallIdRef = useRef(dragVertexWallId);
+  const canvasWRef = useRef(canvasW);
+  const canvasHRef = useRef(canvasH);
 
   const { width: screenW, height: screenH } = useWindowDimensions();
   const viewW = 360;
   const viewH = Math.max(260, Math.min(420, Math.round(screenH * 0.40)));
 
   const toScreen = (p: Point) => ({ x: (p.x * scale) + offset.x, y: (p.y * scale) + offset.y });
-  const toWorld = (x: number, y: number) => ({ x: (x - offset.x) / scale, y: (y - offset.y) / scale });
+  const toWorld = (x: number, y: number) => ({ x: (x - offsetRef.current.x) / scaleRef.current, y: (y - offsetRef.current.y) / scaleRef.current });
 
   // compute bbox for fitToContent
   const [fitTriggerState, setFitTriggerState] = useState(0);
@@ -120,15 +136,56 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
     return pts;
   }, [walls]);
 
+  const allPointsRef = useRef(allPoints);
+  const bboxRef = useRef(bbox);
+  // Sinkronkan ref cermin dengan state terbaru (tiap render) agar PanResponder stabil
+  // tetap melihat nilai paling baru tanpa dibuat ulang.
+  offsetRef.current = offset;
+  scaleRef.current = scale;
+  modeRef.current = mode;
+  toolRef.current = tool;
+  snapGridRef.current = snapGrid;
+  snapOrthoRef.current = snapOrtho;
+  magnetOnRef.current = magnetOn;
+  wallsRef.current = walls;
+  prestartRef.current = prestart;
+  preendRef.current = preend;
+  dragVertexPointRef.current = dragVertexPoint;
+  dragVertexWallIdRef.current = dragVertexWallId;
+  canvasWRef.current = canvasW;
+  canvasHRef.current = canvasH;
+  allPointsRef.current = allPoints;
+  bboxRef.current = bbox;
+
+  // Batas pan yang memperhitungkan skala zoom: denah boleh digeser ke segala arah,
+  // tapi selalu menyisakan minimal PAN_MARGIN px konten di layar (tidak hilang total).
+  // Kalau konten lebih kecil dari kanvas (zoom out), kunci di tengah.
+  const clampOffset = (off: Point): Point => {
+    const PAN_MARGIN = 40;
+    const s = scaleRef.current;
+    const cw = canvasWRef.current;
+    const ch = canvasHRef.current;
+    const b = bboxRef.current;
+    let x = off.x;
+    let y = off.y;
+    const maxOffX = cw - PAN_MARGIN - b.minX * s;
+    const minOffX = PAN_MARGIN - b.maxX * s;
+    x = maxOffX >= minOffX ? Math.min(Math.max(x, minOffX), maxOffX) : (minOffX + maxOffX) / 2;
+    const maxOffY = ch - PAN_MARGIN - b.minY * s;
+    const minOffY = PAN_MARGIN - b.maxY * s;
+    y = maxOffY >= minOffY ? Math.min(Math.max(y, minOffY), maxOffY) : (minOffY + maxOffY) / 2;
+    return { x, y };
+  };
+
   const snapWorld = (p: Point): Point => {
-    if (!magnetOn) return p;
+    if (!magnetOnRef.current) return p;
     // endpoint snap
-    const snapEP = nearestPoint(p, allPoints, 0.3);
+    const snapEP = nearestPoint(p, allPointsRef.current, 0.3);
     if (snapEP) return snapEP;
     // segment snap (closest projection)
     let bestProj: Point | null = null;
     let bestDist = 0.3;
-    for (const w of walls) {
+    for (const w of wallsRef.current) {
       const d = distancePointToSegment(p, w.p1, w.p2);
       if (d <= bestDist) {
         bestDist = d;
@@ -157,17 +214,19 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
     onPanResponderGrant: (e) => {
       const { locationX, locationY } = e.nativeEvent;
       const wpt = toWorld(locationX, locationY);
-      if (tool === 'draw' && mode === 'none') {
-        const snap = snapGrid ? snapToGrid(wpt, 0.1) : wpt;
-        setPrestart(snap);
-        setPreend(snap);
-        setMode('draw');
+      // Mode Gambar: satu jari di kanvas = gambar dinding (bukan pan).
+      if (toolRef.current === 'draw' && modeRef.current === 'none') {
+        const snap = snapGridRef.current ? snapToGrid(wpt, 0.1) : wpt;
+        prestartRef.current = snap; setPrestart(snap);
+        preendRef.current = snap; setPreend(snap);
+        modeRef.current = 'draw'; setMode('draw');
         return;
       }
-      if (tool === 'select') {
+      // Mode Pilih: sentuh dinding = pilih/geser titik; area kosong = pan.
+      if (toolRef.current === 'select') {
         // try select wall by line proximity
         let best: { w: typeof walls[0]; d: number } | null = null;
-        for (const w of walls) {
+        for (const w of wallsRef.current) {
           const d = distancePointToSegment(wpt, w.p1, w.p2);
           if (d < 0.35) { // ~35 px at 50 scale? use world distance ~0.35m ~ 17px
             if (!best || d < best.d) best = { w, d };
@@ -179,100 +238,103 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
           const nearP1 = distance(wpt, best.w.p1) < 0.25;
           const nearP2 = distance(wpt, best.w.p2) < 0.25;
           if (nearP1 || nearP2) {
-            setDragVertexPoint(nearP1 ? best.w.p1 : best.w.p2);
-            setDragVertexWallId(best.w.id);
-            setMode('dragVertex');
+            const vp = nearP1 ? best.w.p1 : best.w.p2;
+            dragVertexPointRef.current = vp; setDragVertexPoint(vp);
+            dragVertexWallIdRef.current = best.w.id; setDragVertexWallId(best.w.id);
+            modeRef.current = 'dragVertex'; setMode('dragVertex');
             return;
           }
         }
       }
-      setPanStart({ x: locationX, y: locationY });
-      setPanOffsetStart({ ...offset });
-      setMode('pan');
+      // Area kosong: mulai pan. Simpan offset awal gesture agar translasi jari diakumulasi.
+      panStartRef.current = { x: locationX, y: locationY };
+      panOffsetStartRef.current = { ...offsetRef.current };
+      modeRef.current = 'pan'; setMode('pan');
     },
     onPanResponderMove: (_e, gs) => {
-      if (mode === 'pan') {
-        const newOff = { x: panOffsetStart.x + gs.dx, y: panOffsetStart.y + gs.dy };
-        setOffset(newOff);
-      } else if (mode === 'draw') {
+      if (modeRef.current === 'pan') {
+        // offset baru = offset saat gesture mulai + total translasi jari, lalu clamp ke batas.
+        const raw = { x: panOffsetStartRef.current.x + gs.dx, y: panOffsetStartRef.current.y + gs.dy };
+        setOffset(clampOffset(raw));
+        setUserAdjusted(true);
+      } else if (modeRef.current === 'draw') {
         const wpt = toWorld(gs.moveX, gs.moveY);
-        let p = snapGrid ? snapToGrid(wpt, 0.1) : wpt;
-        if (snapOrtho && prestart) {
-          p = snapOrthogonal(prestart, p, 7);
+        let p = snapGridRef.current ? snapToGrid(wpt, 0.1) : wpt;
+        if (snapOrthoRef.current && prestartRef.current) {
+          p = snapOrthogonal(prestartRef.current, p, 7);
         }
-        if (magnetOn) {
+        if (magnetOnRef.current) {
           p = snapWorld(p);
           setSnapTarget(p);
         } else {
           setSnapTarget(null);
         }
-        setPreend(p);
-      } else if (mode === 'dragVertex') {
+        preendRef.current = p; setPreend(p);
+      } else if (modeRef.current === 'dragVertex') {
         const wpt = toWorld(gs.moveX, gs.moveY);
-        let p = snapGrid ? snapToGrid(wpt, 0.1) : wpt;
+        let p = snapGridRef.current ? snapToGrid(wpt, 0.1) : wpt;
         // snap to existing points
-        const near = nearestPoint(p, allPoints, 0.3);
+        const near = nearestPoint(p, allPointsRef.current, 0.3);
         if (near) p = near;
-        if (magnetOn) {
+        if (magnetOnRef.current) {
           p = snapWorld(p);
           setSnapTarget(p);
         } else {
           setSnapTarget(null);
         }
-        if (dragVertexPoint && dragVertexWallId) {
-          const old = dragVertexPoint;
+        if (dragVertexPointRef.current && dragVertexWallIdRef.current) {
           // only update preview, commit on release
-          setDragVertexPoint(p);
+          dragVertexPointRef.current = p; setDragVertexPoint(p);
         }
       }
     },
     onPanResponderRelease: (e, gs) => {
-      if (mode === 'draw') {
-        if (prestart && preend) {
-          let p1 = prestart;
-          let p2 = preend;
-          if (snapOrtho) p2 = snapOrthogonal(p1, p2, 7);
+      if (modeRef.current === 'draw') {
+        if (prestartRef.current && preendRef.current) {
+          let p1 = prestartRef.current;
+          let p2 = preendRef.current;
+          if (snapOrthoRef.current) p2 = snapOrthogonal(p1, p2, 7);
           const len = wallLength(p1, p2);
           if (len >= MIN_LEN) {
             // snap to existing points if near
-            const nearP1 = nearestPoint(p1, allPoints, 0.3);
-            const nearP2 = nearestPoint(p2, allPoints, 0.3);
+            const nearP1 = nearestPoint(p1, allPointsRef.current, 0.3);
+            const nearP2 = nearestPoint(p2, allPointsRef.current, 0.3);
             if (nearP1) p1 = nearP1;
             if (nearP2) p2 = nearP2;
-            if (magnetOn) {
+            if (magnetOnRef.current) {
               p1 = snapWorld(p1);
               p2 = snapWorld(p2);
             }
             addWallAt(p1, p2);
           }
         }
-        setPrestart(null);
-        setPreend(null);
+        prestartRef.current = null; setPrestart(null);
+        preendRef.current = null; setPreend(null);
         setSnapTarget(null);
-        setMode('none');
+        modeRef.current = 'none'; setMode('none');
         return;
       }
-      if (mode === 'dragVertex') {
+      if (modeRef.current === 'dragVertex') {
         const wpt = toWorld(e.nativeEvent.locationX, e.nativeEvent.locationY);
-        let p = snapGrid ? snapToGrid(wpt, 0.1) : wpt;
-        if (magnetOn) {
+        let p = snapGridRef.current ? snapToGrid(wpt, 0.1) : wpt;
+        if (magnetOnRef.current) {
           p = snapWorld(p);
         }
-        const near = nearestPoint(p, allPoints, 0.3);
+        const near = nearestPoint(p, allPointsRef.current, 0.3);
         if (near) p = near;
-        if (dragVertexPoint && dragVertexWallId) {
-          moveVertex(dragVertexPoint, p);
+        if (dragVertexPointRef.current && dragVertexWallIdRef.current) {
+          moveVertex(dragVertexPointRef.current, p);
         }
-        setDragVertexPoint(null);
-        setDragVertexWallId(null);
+        dragVertexPointRef.current = null; setDragVertexPoint(null);
+        dragVertexWallIdRef.current = null; setDragVertexWallId(null);
         setSnapTarget(null);
-        setMode('none');
+        modeRef.current = 'none'; setMode('none');
         setUserAdjusted(true);
         return;
       }
-      if (mode === 'deleteTap') {
+      if (modeRef.current === 'deleteTap') {
         const wpt = toWorld(e.nativeEvent.locationX, e.nativeEvent.locationY);
-        for (const w of walls) {
+        for (const w of wallsRef.current) {
           if (distancePointToSegment(wpt, w.p1, w.p2) < 0.35) {
             Alert.alert('Hapus dinding', `Hapus ${w.name}?`, [
               { text: 'Batal', style: 'cancel' },
@@ -281,17 +343,18 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
             break;
           }
         }
-        setMode('none');
+        modeRef.current = 'none'; setMode('none');
         return;
       }
-      setMode('none');
+      // Akhir gesture pan: offset sudah tersimpan di state (tidak di-reset).
+      modeRef.current = 'none'; setMode('none');
     },
     onPanResponderTerminate: () => {
-      setMode('none');
-      setPrestart(null);
-      setPreend(null);
+      modeRef.current = 'none'; setMode('none');
+      prestartRef.current = null; setPrestart(null);
+      preendRef.current = null; setPreend(null);
     },
-  }), [tool, snapGrid, snapOrtho, walls, offset, scale, mode, prestart]);
+  }), []);
 
   // render helpers
   const ptScreen = (p: Point) => toScreen(p);
