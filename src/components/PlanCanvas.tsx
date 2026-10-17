@@ -12,7 +12,7 @@ const TAP_RADIUS = 22; // px
 const VERTEX_R = 8;
 const MIN_LEN = 0.3;
 
-export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) {
+export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onToggleFullscreen }: { fitTrigger?: number; isFullscreen?: boolean; onToggleFullscreen?: () => void }) {
   const walls = useWallStore((s) => s.walls);
   const selectedId = useWallStore((s) => s.selectedId);
   const rooms = useWallStore((s) => s.rooms);
@@ -388,10 +388,15 @@ export default function PlanCanvas({ fitTrigger = 0 }: { fitTrigger?: number }) 
         <Pressable onPress={fitToContent} style={{ padding: 4, borderRadius: 6, backgroundColor: '#1e293b', width: 44, alignItems: 'center' }}>
           <RNText style={{ color: '#fff', fontSize: 9 }}>Pas</RNText>
         </Pressable>
-        <Pressable onPress={() => { setScale((s) => Math.min(150, s + 10)); }} style={{ padding: 4, borderRadius: 6, backgroundColor: '#1e293b', width: 44, alignItems: 'center' }}>
+        {onToggleFullscreen && (
+          <Pressable onPress={onToggleFullscreen} style={{ padding: 4, borderRadius: 6, backgroundColor: isFullscreen ? C.primary : '#1e293b', width: 44, alignItems: 'center' }}>
+            <RNText style={{ color: '#fff', fontSize: 9 }}>{isFullscreen ? 'Keluar' : 'Penuh'}</RNText>
+          </Pressable>
+        )}
+        <Pressable onPress={() => { setScale((s) => Math.min(150, s + 10)); setUserAdjusted(true); }} style={{ padding: 4, borderRadius: 6, backgroundColor: '#1e293b', width: 44, alignItems: 'center' }}>
           <RNText style={{ color: '#fff', fontSize: 14 }}>+</RNText>
         </Pressable>
-        <Pressable onPress={() => { setScale((s) => Math.max(15, s - 10)); }} style={{ padding: 4, borderRadius: 6, backgroundColor: '#1e293b', width: 44, alignItems: 'center' }}>
+        <Pressable onPress={() => { setScale((s) => Math.max(15, s - 10)); setUserAdjusted(true); }} style={{ padding: 4, borderRadius: 6, backgroundColor: '#1e293b', width: 44, alignItems: 'center' }}>
           <RNText style={{ color: '#fff', fontSize: 14 }}>−</RNText>
         </Pressable>
         {tool === 'draw' && (

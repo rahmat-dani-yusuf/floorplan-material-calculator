@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { Alert, Modal, PanResponder, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import PlanCanvas from '../components/PlanCanvas';
 import Stepper from '../components/Stepper';
 import ChipGroup from '../components/ChipGroup';
@@ -44,6 +44,31 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const [roomCutW, setRoomCutW] = useState('2');
   const [roomCutL, setRoomCutL] = useState('2');
   const [fitTrigger, setFitTrigger] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [panelH, setPanelH] = useState<number | null>(null); // tinggi panel bawah (px); null = default flex
+  const { height: winH } = useWindowDimensions();
+  const panelHRef = useRef<number | null>(null);
+  panelHRef.current = panelH;
+  const dragStartHRef = useRef(320);
+
+  // Handle seret di tepi atas panel: PanResponder tersendiri (terpisah dari
+  // gesture kanvas) sehingga tidak bentrok dengan pan/zoom/gambar dinding.
+  const panelDrag = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: () => {
+      dragStartHRef.current = panelHRef.current ?? 320;
+    },
+    onPanResponderMove: (_e, gs) => {
+      // Seret ke atas (dy negatif) = panel membesar; ke bawah = mengecil.
+      // Batas min: handle + bar "+ Ruangan" (~120px). Batas maks: kanvas
+      // menyisakan min ~35% tinggi layar untuk kanvas (+ header ~150px).
+      const minH = 120;
+      const maxH = Math.max(minH + 40, winH - Math.round(winH * 0.35) - 150);
+      const next = Math.min(Math.max(dragStartHRef.current - gs.dy, minH), maxH);
+      setPanelH(Math.round(next));
+    },
+  }), [winH]);
   const addRoom = useWallStore((s) => s.addRoom);
   const loadPlan = useWallStore((s) => s.loadPlan);
   const loadWalls = useWallStore((s) => s.loadWalls);
@@ -144,7 +169,8 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* header */}
+      {/* header — disembunyikan saat mode penuh */}
+      {!isFullscreen && (
       <View style={{ paddingTop: 48, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: '#131b2e' }}>
         <Text style={{ color: C.text, fontSize: 18, fontWeight: '600' }}>Edit Dinding</Text>
         <Text style={{ color: C.secondary, fontSize: 12 }}>{project ? project.name : 'Proyek Baru'}</Text>
@@ -172,12 +198,31 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           {tool('Simpan', () => { setDefaultNama('Proyek ' + new Date().toLocaleDateString('id-ID')); setModalVisible(true); }, true)}
         </View>
       </View>
+      )}
 
-      <PlanCanvas fitTrigger={fitTrigger} />
+      <View style={{ flex: 1, position: 'relative' }}>
+        <PlanCanvas fitTrigger={fitTrigger} isFullscreen={isFullscreen} onToggleFullscreen={() => setIsFullscreen((v) => !v)} />
+        {isFullscreen && (
+          <View style={{ position: 'absolute', top: 48, right: 12, flexDirection: 'row', gap: 8 }}>
+            {tool('Undo', s.undo, s.past.length > 0)}
+            {tool('Redo', s.redo, s.future.length > 0)}
+            {tool('Simpan', () => { setDefaultNama('Proyek ' + new Date().toLocaleDateString('id-ID')); setModalVisible(true); }, true)}
+          </View>
+        )}
+      </View>
 
-      {/* panel parameter */}
+      {/* panel parameter — disembunyikan saat mode penuh */}
+      {!isFullscreen && (
+      <>
+      {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel */}
+      <View
+        {...panelDrag.panHandlers}
+        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingBottom: 2, alignItems: 'center' }}
+      >
+        <View style={{ width: 56, height: 5, borderRadius: 3, backgroundColor: C.outline }} />
+      </View>
       <ScrollView
-        style={{ flex: 1, backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}
+        style={[{ flex: 1, backgroundColor: C.surfaceHigh }, panelH != null ? { flex: 0, height: panelH } : null]}
         contentContainerStyle={{ padding: 16, gap: 12 }}
       >
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 4 }}>
@@ -345,6 +390,8 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Hitung Material & RAB →</Text>
         </Pressable>
       </ScrollView>
+      </>
+      )}
 
       <Modal visible={roomModal} transparent animationType="slide" onRequestClose={() => setRoomModal(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
