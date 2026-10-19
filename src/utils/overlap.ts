@@ -1,4 +1,5 @@
 import type { Wall, Point } from '../types';
+import { effectiveWallLength } from './geometry';
 
 function collinear(p1: Point, p2: Point, p3: Point, p4: Point, dTol = 0.02, angTolDeg = 1): boolean {
   const dx1 = p2.x - p1.x, dy1 = p2.y - p1.y;
@@ -57,7 +58,8 @@ export function effectiveWalls(walls: Wall[], options: { dedupeOverlap?: boolean
   const overlap = dedupe ? overlapIntervals(walls) : walls.map((w) => ({ wallId: w.id, intervals: [] }));
   return walls.map((w, idx) => {
     const info = overlap[idx];
-    const len = w.length_meters;
+    // Dinding lengkung: panjang dasar = busur.
+    const len = effectiveWallLength(w);
     let countedLength = len;
     if (dedupe && info.intervals.length > 0) {
       const totalOver = info.intervals.reduce((s, iv) => s + Math.max(0, iv.end - iv.start), 0);

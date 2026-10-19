@@ -4,6 +4,7 @@ import {
   SAND_M3_PER_M2, PAINT_SIDES, PAINT_COATS, PRIMER_M2_PER_LITER, TOPCOAT_M2_PER_LITER,
 } from '../constants/materials';
 import type { BrickType, MaterialQuantities, WallState, Opening } from '../types';
+import { effectiveWallLength } from './geometry';
 
 /** Pembulatan ke n desimal (default 2). */
 export const round = (value: number, digits = 2): number => {
@@ -50,7 +51,9 @@ export const calcNetArea = (length_meters: number, height_meters: number, openin
  * memakai koefisien tunggal, jadi belum mempengaruhi hasil.
  */
 export function calculateMaterials(wall: WallState): MaterialQuantities {
-  const gross_area = calcArea(wall.length_meters, wall.height_meters);
+  // Dinding lengkung memakai panjang busur, bukan jarak lurus.
+  const len = effectiveWallLength(wall);
+  const gross_area = calcArea(len, wall.height_meters);
   const openings_area = calcOpeningsArea(wall.openings ?? []);
   const net_area = Math.max(0, gross_area - openings_area);
   return {

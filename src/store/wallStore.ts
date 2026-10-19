@@ -5,9 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
-import { wallLength, withSyncedLength, moveEndAlongDirection, normalizePointsEqual, snapToGrid, nearestPoint, distancePointToSegment, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength } from '../utils/geometry';
+import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
-import { defaultFloor, migrateProjectFloors } from '../types';
+import { defaultFloor } from '../types';
 
 export const DEFAULT_WALL: Wall = {
   id: 'w-1',
@@ -131,40 +131,8 @@ export const useWallStore = create<WallStore>()(
     return { floor: f, walls: f ? f.walls : [], rooms: f?.rooms ?? [], dedupe: f?.dedupeOverlap ?? true, id: f?.id ?? null };
   };
 
-  // ----- Dinding melengkung -----
-  let lastArcEditId: string | null = null;
-  let lastArcEditAt = 0;
-  const applyArc = (id: string, sagitta: number | undefined, coalesce = false) => {
-    const { walls, selectedId, past } = get();
-    const idx = walls.findIndex((w) => w.id === id);
-    if (idx === -1) return;
-    const w = walls[idx];
-    const chord = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y);
-    let next: Wall;
-    if (sagitta === undefined) {
-      if (w.arc_sagitta_m === undefined) return;
-      const { arc_sagitta_m: _omit, ...rest } = w;
-      next = rest as Wall;
-    } else {
-      const sign = sagitta < 0 ? -1 : 1;
-      const abs = Math.min(chord / 2, Math.max(0.02, Math.round(Math.abs(sagitta) * 100) / 100));
-      const value = sign * abs;
-      if (w.arc_sagitta_m === value) return;
-      next = { ...w, arc_sagitta_m: value };
-    }
-    const nextWalls = [...walls];
-    nextWalls[idx] = next;
-    // Saat busur diseret, gabungkan jadi satu langkah undo (bukan puluhan).
-    const now = Date.now();
-    const merge = coalesce && lastArcEditId === id && now - lastArcEditAt < 600;
-    lastArcEditId = coalesce ? id : null;
-    lastArcEditAt = now;
-    set({
-      walls: nextWalls,
-      past: merge ? past : [...past, { walls, selectedId }].slice(-50),
-      future: [],
-    });
-  };
+  // ----- Dinding melengkung: aksi tunggal (toggleArc / setArcRadius /
+  // setArcSagitta / flipArc) ada di bawah. length_meters selalu = panjang busur.
 
   return {
     

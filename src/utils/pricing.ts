@@ -1,8 +1,9 @@
 // ===== LANGKAH 4: Harga & ringkasan biaya (RAB) =====
 import { BRICK_LABEL, DEFAULT_PRICES } from '../constants/materials';
-import type { CostLineItem, CostSummary, UnitPrices, WallState, ProjectSummary, Wall, Floor, FloorSummary, MultiFloorSummary } from '../types';
+import type { CostLineItem, CostSummary, UnitPrices, ProjectSummary, Wall, Floor, FloorSummary, MultiFloorSummary } from '../types';
 import { calculateMaterials, round } from './calculator';
 import { effectiveWalls } from './overlap';
+import { effectiveWallLength } from './geometry';
 
 /** Format Rupiah manual (Intl id-ID tidak selalu ada di Hermes/Android). */
 export const formatRupiah = (value: number): string =>
@@ -25,10 +26,12 @@ export function buildCostSummary(
   prices: UnitPrices = DEFAULT_PRICES,
   options: { dedupeOverlap?: boolean } = {},
 ): CostSummary {
+  // Panjang dasar selalu busur (bukan tali) agar dinding lengkung benar.
+  const baseLen = effectiveWallLength(wall);
   const w = options.dedupeOverlap ? (() => {
-    const eff = effectiveWalls([wall], { dedupeOverlap: true })[0];
+    const eff = effectiveWalls([{ ...wall, length_meters: baseLen }], { dedupeOverlap: true })[0];
     return { ...wall, length_meters: eff.counted_length };
-  })() : wall;
+  })() : { ...wall, length_meters: baseLen };
   const q = calculateMaterials(w);
 
   const line_items: CostLineItem[] = [
@@ -62,9 +65,10 @@ export function buildProjectSummary(
   let totalArea = 0;
 
   for (const w of walls) {
-    const q = calculateMaterials(w);
+    const baseLen = effectiveWallLength(w);
+    const q = calculateMaterials({ ...w, length_meters: baseLen });
     if (options.dedupeOverlap) {
-      const eff = effectiveWalls([w], { dedupeOverlap: true })[0];
+      const eff = effectiveWalls([{ ...w, length_meters: baseLen }], { dedupeOverlap: true })[0];
       totalArea += eff.counted_length * w.height_meters;
     } else {
       totalArea += q.area_m2;

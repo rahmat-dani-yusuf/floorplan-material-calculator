@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/authStore';
 import { keluar } from '../services/authService';
 import { BRICK_LABEL, DEFAULT_PINTU, DEFAULT_JENDELA, OPENING_LIMITS } from '../constants/materials';
 import type { BrickType, MortarRatio, Point } from '../types';
+import { minRadius, radiusFromSagitta } from '../utils/geometry';
 import { C } from '../theme';
 import NamaProyekModal from '../components/NamaProyekModal';
 import TemplateModal from '../components/TemplateModal';
@@ -77,6 +78,13 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const project = useProjectStore((s) => s.currentProjectId ? s.projects.find((p) => p.id === s.currentProjectId) : null);
   const saveCurrent = useProjectStore((s) => s.saveCurrent);
   const newProject = useProjectStore((s) => s.newProject);
+  const floors = useWallStore((s) => s.floors);
+  const activeFloorId = useWallStore((s) => s.activeFloorId);
+  const setActiveFloor = useWallStore((s) => s.setActiveFloor);
+  const addFloor = useWallStore((s) => s.addFloor);
+  const removeFloor = useWallStore((s) => s.removeFloor);
+  const [copyFromBelow, setCopyFromBelow] = useState(true);
+  const [arcRadiusText, setArcRadiusText] = useState('');
   const wall = selectActiveWall(s);
 
   const tool = (label: string, onPress: () => void, enabled = true, danger = false) => (
@@ -246,6 +254,48 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           <Text style={{ color: s.dedupeOverlap ? '#fff' : C.text, fontSize: 10, fontWeight: '600' }}>{s.dedupeOverlap ? 'Hitung sekali' : 'Hitung semua'}</Text>
         </Pressable>
 
+        {/* tab/selector lantai */}
+        <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10, marginBottom: 4 }}>
+          <Text style={{ color: C.textDim, fontSize: 12, marginBottom: 6 }}>Lantai ({floors.length})</Text>
+          <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {floors.map((f) => (
+              <Pressable
+                key={f.id}
+                onPress={() => setActiveFloor(f.id)}
+                style={{
+                  paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8,
+                  backgroundColor: f.id === activeFloorId ? C.primary : C.surfaceHighest,
+                }}
+              >
+                <Text style={{ color: f.id === activeFloorId ? '#fff' : C.text, fontSize: 12, fontWeight: f.id === activeFloorId ? '700' : '400' }}>
+                  {f.name}
+                </Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => addFloor({ copyFromBelow })}
+              style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: C.surfaceHighest }}
+            >
+              <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>+ Lantai</Text>
+            </Pressable>
+            {floors.length > 1 && activeFloorId && (
+              <Pressable
+                onPress={() => confirm('Hapus lantai?', `Hapus ${floors.find((f) => f.id === activeFloorId)?.name ?? 'lantai ini'} beserta dindingnya?`, () => removeFloor(activeFloorId))}
+                style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: '#93000a55' }}
+              >
+                <Text style={{ color: C.error, fontSize: 12, fontWeight: '700' }}>Hapus lantai</Text>
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            onPress={() => setCopyFromBelow((v) => !v)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8, marginTop: 6 }}
+          >
+            <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: copyFromBelow ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{copyFromBelow && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+            <Text style={{ color: C.text, fontSize: 11 }}>Salin dari lantai bawah saat tambah lantai</Text>
+          </Pressable>
+        </View>
+
         {/* tab dinding */}
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {walls.map((w) => (
@@ -284,6 +334,83 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
         </View>
         <ChipGroup label="Jenis Bata" options={BRICKS} selected={wall.brick_type} onSelect={s.setBrickType} />
         <ChipGroup label="Tipe Adukan" options={MORTARS} selected={wall.mortar_ratio} onSelect={s.setMortarRatio} />
+
+        {/* Dinding melengkung */}
+        {(() => {
+          const sag = wall.arc_sagitta_m || 0;
+          const curved = Math.abs(sag) >= 1e-9;
+          const chord = Math.hypot(wall.p2.x - wall.p1.x, wall.p2.y - wall.p1.y);
+          const minR = minRadius(wall.p1, wall.p2);
+          const curR = curved ? radiusFromSagitta(wall.p1, wall.p2, sag) : 0;
+          const shownR = arcRadiusText !== '' ? arcRadiusText : (curved && Number.isFinite(curR) ? String(Math.round(curR * 100) / 100) : '');
+          return (
+            <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>Lengkung</Text>
+                <Pressable
+                  onPress={() => { setArcRadiusText(''); s.toggleArc(wall.id, !curved); }}
+                  style={{ paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: curved ? C.primary : C.surfaceHighest }}
+                >
+                  <Text style={{ color: curved ? '#fff' : C.text, fontSize: 12, fontWeight: '700' }}>{curved ? 'Aktif' : 'Lurus'}</Text>
+                </Pressable>
+              </View>
+              {curved && (
+                <>
+                  <Text style={{ color: C.textDim, fontSize: 11, marginTop: 6 }}>Radius (m) • min {minR.toFixed(2)} m • tali {chord.toFixed(2)} m</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <Pressable
+                      onPress={() => {
+                        const cur = arcRadiusText !== '' ? parseFloat(arcRadiusText.replace(',', '.')) : curR;
+                        const next = (Number.isFinite(cur) ? cur : minR) - 0.1;
+                        const r = Math.round(next * 100) / 100;
+                        if (!(r >= minR - 1e-9)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!s.setArcRadius(wall.id, r)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        setArcRadiusText(String(r));
+                      }}
+                      style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
+                    >
+                      <Text style={{ color: C.text }}>−</Text>
+                    </Pressable>
+                    <TextInput
+                      value={shownR}
+                      onChangeText={setArcRadiusText}
+                      onBlur={() => {
+                        if (arcRadiusText === '') return;
+                        const r = parseFloat(arcRadiusText.replace(',', '.'));
+                        if (!Number.isFinite(r)) { Alert.alert('Radius tidak valid', 'Masukkan angka, contoh 2.5.'); return; }
+                        if (!(r >= minR - 1e-9)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!s.setArcRadius(wall.id, r)) Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`);
+                      }}
+                      keyboardType="decimal-pad"
+                      placeholder={minR.toFixed(2)}
+                      placeholderTextColor={C.outline}
+                      style={{ flex: 1, backgroundColor: C.bg, borderRadius: 6, padding: 8, color: C.text, fontSize: 13, textAlign: 'center' }}
+                    />
+                    <Pressable
+                      onPress={() => {
+                        const cur = arcRadiusText !== '' ? parseFloat(arcRadiusText.replace(',', '.')) : curR;
+                        const next = (Number.isFinite(cur) ? cur : minR) + 0.1;
+                        const r = Math.round(next * 100) / 100;
+                        if (!s.setArcRadius(wall.id, r)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        setArcRadiusText(String(r));
+                      }}
+                      style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
+                    >
+                      <Text style={{ color: C.text }}>+</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => s.flipArc(wall.id)}
+                      style={{ paddingVertical: 8, paddingHorizontal: 10, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
+                    >
+                      <Text style={{ color: C.text, fontSize: 11 }}>Balik arah</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={{ color: C.secondary, fontSize: 11, marginTop: 4 }}>Panjang busur {wall.length_meters.toFixed(2)} m</Text>
+                </>
+              )}
+            </View>
+          );
+        })()}
 
         {/* Bukaan */}
         <View style={{ marginTop: 4 }}>

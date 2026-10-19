@@ -5,18 +5,23 @@ import * as Sharing from 'expo-sharing';
 import { useWallStore } from '../store/wallStore';
 import { usePriceStore } from '../store/priceStore';
 import { useProjectStore } from '../store/projectStore';
-import { buildProjectSummary, buildCostSummary, formatRupiah } from '../utils/pricing';
-import { buildRabText, buildRabHtml } from '../utils/exportRab';
+import { buildProjectSummary, buildMultiFloorSummary, formatRupiah } from '../utils/pricing';
+import { buildMultiFloorRabText, buildMultiFloorRabHtml } from '../utils/exportRab';
 import { BRICK_LABEL } from '../constants/materials';
 import { C } from '../theme';
 
 export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: { onBack: () => void; onOpenPrices?: () => void; onOpenProjects?: () => void }) {
   const walls = useWallStore((s) => s.walls);
+  const floors = useWallStore((s) => s.floors);
+  const activeFloorId = useWallStore((s) => s.activeFloorId);
   const prices = usePriceStore((s) => s.prices);
   const currentProjectId = useProjectStore((s) => s.currentProjectId);
   const projects = useProjectStore((s) => s.projects);
   const summary = buildProjectSummary(walls, prices);
+  // Ringkasan per lantai + grand total semua lantai.
+  const multi = buildMultiFloorSummary(floors.length > 0 ? floors : [{ id: 'f-1', name: 'Lantai 1', height_meters: 3.2, walls }], prices);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [openFloor, setOpenFloor] = useState<Record<string, boolean>>({});
   const [preparing, setPreparing] = useState(false);
 
   const toggle = (id: string) => setOpen((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -45,17 +50,52 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 10 }}>
-        {/* Total proyek */}
+        {/* Total proyek: grand total semua lantai */}
         <View style={{ backgroundColor: C.surfaceHigh, borderRadius: 12, padding: 16 }}>
-          <Text style={{ color: C.outline, fontSize: 11 }}>LUAS NETTO</Text>
-          <Text style={{ color: C.primarySoft, fontSize: 28, fontWeight: '700' }}>{formatRupiah(summary.grand_total)}</Text>
+          <Text style={{ color: C.outline, fontSize: 11 }}>GRAND TOTAL SEMUA LANTAI</Text>
+          <Text style={{ color: C.primarySoft, fontSize: 28, fontWeight: '700' }}>{formatRupiah(multi.grand_total)}</Text>
           <Text style={{ color: C.secondary, fontSize: 12, marginTop: 4 }}>
-            Luas netto {summary.total_area_m2.toFixed(2)} m²
+            Luas netto {multi.total_area_m2.toFixed(2)} m² • {multi.perFloor.length} lantai
+          </Text>
+          <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
+            Lantai aktif: {summary.total_area_m2.toFixed(2)} m² • {walls.length} dinding ({formatRupiah(summary.grand_total)})
           </Text>
           <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
             Harga mengikuti Pengaturan Harga
           </Text>
         </View>
+
+        {/* Ringkasan per lantai */}
+        <Text style={{ color: C.text, fontSize: 16, fontWeight: '700', marginTop: 8 }}>Ringkasan per Lantai</Text>
+        {multi.perFloor.map((f) => {
+          const isActive = f.floorId === activeFloorId;
+          const opened = !!openFloor[f.floorId];
+          return (
+            <View key={f.floorId} style={{ backgroundColor: C.surface, borderRadius: 10, padding: 12, marginTop: 6 }}>
+              <Pressable onPress={() => setOpenFloor((prev) => ({ ...prev, [f.floorId]: !prev[f.floorId] }))} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View>
+                  <Text style={{ color: C.text, fontWeight: '700', fontSize: 14 }}>
+                    {f.floorName}{isActive ? ' (aktif)' : ''} • {f.wallCount} dinding
+                  </Text>
+                  <Text style={{ color: C.secondary, fontSize: 11 }}>
+                    {f.summary.total_area_m2.toFixed(2)} m² netto
+                  </Text>
+                </View>
+                <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>{formatRupiah(f.summary.grand_total)}</Text>
+              </Pressable>
+              {opened && (
+                <View style={{ marginTop: 8, gap: 4 }}>
+                  {f.summary.line_items.map((item) => (
+                    <View key={item.name} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                      <Text style={{ color: C.text, fontSize: 12 }}>{item.name}</Text>
+                      <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} → {formatRupiah(item.subtotal)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
 
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
           <Pressable
@@ -64,7 +104,7 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
                 Alert.alert('Fitur ini hanya tersedia di HP');
                 return;
               }
-              const text = buildRabText(projectName, summary);
+              const text = buildMultiFloorRabText(projectName, multi);
               Share.share({ message: text }).catch(() => {});
             }}
             style={{ flex: 1, backgroundColor: C.surface, borderRadius: 10, padding: 10, alignItems: 'center' }}
@@ -79,7 +119,7 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
               }
               try {
                 setPreparing(true);
-                const html = buildRabHtml(projectName, summary);
+                const html = buildMultiFloorRabHtml(projectName, multi);
                 const { uri } = await Print.printToFileAsync({ html });
                 const available = await Sharing.isAvailableAsync();
                 if (!available) {
@@ -99,7 +139,7 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
           </Pressable>
         </View>
 
-        {/* Line items gabungan */}
+        {/* Line items gabungan lantai aktif */}
         {summary.line_items.map((i) => (
           <View key={i.name} style={{ backgroundColor: C.surface, borderRadius: 10, padding: 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -141,10 +181,7 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
                   <View key={item.name} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
                     <Text style={{ color: C.text, fontSize: 12 }}>{item.name}</Text>
                     <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} → {formatRupiah(item.subtotal)}</Text>
-          <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
-            Harga mengikuti Pengaturan Harga
-          </Text>
-        </View>
+                  </View>
                 ))}
               </View>
             )}
