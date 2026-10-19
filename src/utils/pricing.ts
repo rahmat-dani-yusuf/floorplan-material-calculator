@@ -1,6 +1,6 @@
 // ===== LANGKAH 4: Harga & ringkasan biaya (RAB) =====
 import { BRICK_LABEL, DEFAULT_PRICES } from '../constants/materials';
-import type { CostLineItem, CostSummary, UnitPrices, WallState, ProjectSummary, Wall } from '../types';
+import type { CostLineItem, CostSummary, UnitPrices, WallState, ProjectSummary, Wall, Floor, FloorSummary, MultiFloorSummary } from '../types';
 import { calculateMaterials, round } from './calculator';
 import { effectiveWalls } from './overlap';
 
@@ -165,4 +165,18 @@ export function buildProjectSummary(
     total_area_m2: round(totalArea),
     grand_total: (aggregatedLineItems || line_items).reduce((sum, i) => sum + i.subtotal, 0),
   };
+}
+
+/** Ringkasan per lantai + grand total semua lantai (rumus per dinding tak berubah). */
+export function buildMultiFloorSummary(
+  floors: Floor[],
+  prices: UnitPrices = DEFAULT_PRICES,
+): MultiFloorSummary {
+  const perFloor: FloorSummary[] = (floors ?? []).map((f) => {
+    const summary = buildProjectSummary(f.walls ?? [], prices, { dedupeOverlap: f.dedupeOverlap ?? true });
+    return { floorId: f.id, floorName: f.name, wallCount: (f.walls ?? []).length, summary };
+  });
+  const total_area_m2 = round(perFloor.reduce((s, f) => s + (f.summary.total_area_m2 || 0), 0));
+  const grand_total = perFloor.reduce((s, f) => s + (f.summary.grand_total || 0), 0);
+  return { perFloor, total_area_m2, grand_total };
 }

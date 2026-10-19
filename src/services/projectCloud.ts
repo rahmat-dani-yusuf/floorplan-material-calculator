@@ -31,14 +31,51 @@ function computeRingkasan(walls: any[], dedupeOverlap?: boolean) {
   };
 }
 
+function allWalls(proyek: any): any[] {
+  if (Array.isArray(proyek.floors) && proyek.floors.length > 0) {
+    return proyek.floors.flatMap((f: any) => f.walls || []);
+  }
+  return proyek.walls || [];
+}
+
+function allRoomsCount(proyek: any): number {
+  if (Array.isArray(proyek.floors) && proyek.floors.length > 0) {
+    return proyek.floors.reduce((s: number, f: any) => s + ((f.rooms || []).length), 0);
+  }
+  return (proyek.rooms || []).length;
+}
+
+function parsePlan(parsed: any): { walls: any[]; rooms: any[]; dedupeOverlap: boolean; floors: any[]; activeFloorId?: string } {
+  // Proyek lama (tanpa floors): migrasi otomatis menjadi 1 lantai.
+  if (Array.isArray(parsed.floors) && parsed.floors.length > 0) {
+    return {
+      floors: parsed.floors,
+      activeFloorId: parsed.activeFloorId || parsed.floors[0]?.id,
+      walls: parsed.floors[0]?.walls || [],
+      rooms: parsed.floors[0]?.rooms || [],
+      dedupeOverlap: parsed.floors[0]?.dedupeOverlap ?? parsed.dedupeOverlap ?? true,
+    };
+  }
+  const walls = parsed.walls || [];
+  const rooms = parsed.rooms || [];
+  return {
+    walls,
+    rooms,
+    dedupeOverlap: parsed.dedupeOverlap ?? true,
+    floors: [{ id: 'f-1', name: 'Lantai 1', height_meters: 3.2, walls, rooms, dedupeOverlap: parsed.dedupeOverlap ?? true }],
+    activeFloorId: 'f-1',
+  };
+}
+
 export async function simpanProyek(uid: string, proyek: any): Promise<void> {
   const id = proyek?.id || proyek?.projectId;
   if (!uid || !id) throw new Error('uid dan id proyek diperlukan');
-  const walls = (proyek.walls || []).map((w: any) => sanitize(w));
-  const rooms = (proyek.rooms || []).map((r: any) => sanitize(r));
+  const floors = (proyek.floors || []).map((f: any) => sanitize(f));
+  const walls = (floors.length > 0 ? floors.flatMap((f: any) => f.walls || []) : (proyek.walls || [])).map((w: any) => sanitize(w));
+  const roomsCount = floors.length > 0 ? floors.reduce((s: number, f: any) => s + ((f.rooms || []).length), 0) : (proyek.rooms || []).length;
   const dedupeOverlap = proyek.dedupeOverlap ?? true;
   const ringkasanBase = computeRingkasan(walls, dedupeOverlap);
-  ringkasanBase.jumlahRuangan = rooms.length;
+  ringkasanBase.jumlahRuangan = roomsCount;
 
   const payload = sanitize({
     id,
@@ -46,7 +83,7 @@ export async function simpanProyek(uid: string, proyek: any): Promise<void> {
     dibuatPada: proyek.createdAt || proyek.dibuatPada || Date.now(),
     diubahPada: proyek.updatedAt || proyek.diubahPada || Date.now(),
     ringkasan: ringkasanBase,
-    planJson: JSON.stringify(sanitize({ walls, rooms, dedupeOverlap, id, nama: proyek.name || proyek.nama, dibuatPada: proyek.createdAt || proyek.dibuatPada, diubahPada: proyek.updatedAt || proyek.diubahPada })),
+    planJson: JSON.stringify(sanitize({ walls, rooms: [], dedupeOverlap, floors, activeFloorId: proyek.activeFloorId, id, nama: proyek.name || proyek.nama, dibuatPada: proyek.createdAt || proyek.dibuatPada, diubahPada: proyek.updatedAt || proyek.diubahPada })),
   });
 
   const ref = doc(db, 'users', uid, 'projects', id);
@@ -66,12 +103,15 @@ export function dengarkanProyek(uid: string, onData: (projects: any[]) => void, 
       try {
         const data = d.data();
         const parsed = JSON.parse(data.planJson || '{}');
+        const plan = parsePlan(parsed);
         arr.push({
           id: data.id || d.id,
           name: data.nama || parsed.nama || '',
-          walls: (parsed.walls || []),
-          rooms: (parsed.rooms || []),
-          dedupeOverlap: parsed.dedupeOverlap ?? true,
+          walls: plan.walls,
+          rooms: plan.rooms,
+          dedupeOverlap: plan.dedupeOverlap,
+          floors: plan.floors,
+          activeFloorId: plan.activeFloorId,
           createdAt: data.dibuatPada || parsed.dibuatPada || Date.now(),
           updatedAt: data.diubahPada || parsed.diubahPada || Date.now(),
         });
@@ -92,12 +132,15 @@ export async function ambilSemuaProyek(uid: string): Promise<any[]> {
     try {
       const data = d.data();
       const parsed = JSON.parse(data.planJson || '{}');
+      const plan = parsePlan(parsed);
       arr.push({
         id: data.id || d.id,
         name: data.nama || parsed.nama || '',
-        walls: (parsed.walls || []),
-        rooms: (parsed.rooms || []),
-        dedupeOverlap: parsed.dedupeOverlap ?? true,
+        walls: plan.walls,
+        rooms: plan.rooms,
+        dedupeOverlap: plan.dedupeOverlap,
+        floors: plan.floors,
+        activeFloorId: plan.activeFloorId,
         createdAt: data.dibuatPada || parsed.dibuatPada || Date.now(),
         updatedAt: data.diubahPada || parsed.diubahPada || Date.now(),
       });

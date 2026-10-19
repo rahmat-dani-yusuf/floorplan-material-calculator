@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Project, Wall } from '../types';
+import { migrateProjectFloors } from '../types';
 import { useWallStore } from './wallStore';
 import { useAuthStore } from './authStore';
 import { confirm } from '../utils/confirm';
@@ -26,11 +27,24 @@ interface ProjectStore {
 
 function buildUploadObj(project: any, isCurrent: boolean) {
   const wallState = useWallStore.getState();
+  if (isCurrent) {
+    return {
+      ...project,
+      walls: wallState.walls,
+      rooms: wallState.rooms || [],
+      floors: wallState.floors,
+      activeFloorId: wallState.activeFloorId,
+      dedupeOverlap: wallState.dedupeOverlap ?? project.dedupeOverlap ?? true,
+      updatedAt: Date.now(),
+    };
+  }
   return {
     ...project,
-    walls: isCurrent ? wallState.walls : (project.walls || []),
-    rooms: isCurrent ? (wallState.rooms || []) : (project.rooms || []),
-    dedupeOverlap: isCurrent ? (wallState.dedupeOverlap ?? project.dedupeOverlap ?? true) : (project.dedupeOverlap ?? true),
+    walls: project.walls || [],
+    rooms: project.rooms || [],
+    floors: project.floors,
+    activeFloorId: project.activeFloorId,
+    dedupeOverlap: project.dedupeOverlap ?? true,
     updatedAt: Date.now(),
   };
 }
@@ -100,6 +114,8 @@ export const useProjectStore = create<ProjectStore>()(
             createdAt: now,
             updatedAt: now,
             rooms: wallState.rooms || [],
+            floors: wallState.floors,
+            activeFloorId: wallState.activeFloorId,
             dedupeOverlap: wallState.dedupeOverlap ?? true,
           };
           set((s) => ({
@@ -115,7 +131,7 @@ export const useProjectStore = create<ProjectStore>()(
           const wallState = useWallStore.getState();
           set({
             projects: projects.map((p: any) =>
-              p.id === currentProjectId ? { ...p, walls: wallState.walls, rooms: wallState.rooms || [], dedupeOverlap: wallState.dedupeOverlap ?? p.dedupeOverlap ?? true, updatedAt: Date.now() } : p
+              p.id === currentProjectId ? { ...p, walls: wallState.walls, rooms: wallState.rooms || [], floors: wallState.floors, activeFloorId: wallState.activeFloorId, dedupeOverlap: wallState.dedupeOverlap ?? p.dedupeOverlap ?? true, updatedAt: Date.now() } : p
             ),
           });
           const proj = get().projects.find((p: any) => p.id === currentProjectId);
@@ -134,13 +150,9 @@ export const useProjectStore = create<ProjectStore>()(
             return { ...w, p1: { x: 0, y: i * 1.5 }, p2: { x: len, y: i * 1.5 }, length_meters: len };
           });
           const wallStore = useWallStore.getState();
-          wallStore.loadWalls(walls);
-          if (proj.dedupeOverlap != null && wallStore.dedupeOverlap !== proj.dedupeOverlap) {
-            wallStore.toggleDedupe();
-          }
-          if ((proj as any).rooms && wallStore.rooms !== undefined) {
-            // wallStore tidak memiliki setter langsung; biarkan room tetap lokal jika dibuka
-          }
+          // Proyek lama (tanpa floors) dimigrasikan otomatis menjadi 1 lantai.
+          const floors = migrateProjectFloors(proj);
+          wallStore.loadFloors(floors, (proj as any).activeFloorId || floors[0]?.id);
           set({ currentProjectId: id });
         },
         renameProject: (id, name) => {

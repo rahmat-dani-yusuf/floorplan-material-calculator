@@ -5,8 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
-import { wallLength, withSyncedLength, moveEndAlongDirection, normalizePointsEqual, snapToGrid, nearestPoint, distancePointToSegment, rectRoomWalls, lShapeRoomWalls, findFreeOrigin } from '../utils/geometry';
-import type { BrickType, MortarRatio, Wall, Opening, Point, Room } from '../types';
+import { wallLength, withSyncedLength, moveEndAlongDirection, normalizePointsEqual, snapToGrid, nearestPoint, distancePointToSegment, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength } from '../utils/geometry';
+import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
+import { defaultFloor, migrateProjectFloors } from '../types';
 
 export const DEFAULT_WALL: Wall = {
   id: 'w-1',
@@ -35,6 +36,8 @@ interface WallStore {
   future: Snapshot[];
   dedupeOverlap: boolean;
   rooms: Room[];
+  floors: Floor[];
+  activeFloorId: string | null;
   addWall: () => void;
   removeWall: (id: string) => void;
   selectWall: (id: string) => void;
@@ -60,6 +63,16 @@ interface WallStore {
   reset: () => void;
   toggleDedupe: () => void;
   setRooms: (rooms: Room[]) => void;
+  setActiveFloor: (id: string) => void;
+  addFloor: (options?: { copyFromBelow?: boolean }) => void;
+  removeFloor: (id: string) => void;
+  renameFloor: (id: string, name: string) => void;
+  setFloorHeight: (id: string, h: number) => void;
+  loadFloors: (floors: Floor[], activeFloorId?: string | null) => void;
+  toggleArc: (id: string, curved: boolean) => void;
+  setArcRadius: (id: string, radius: number) => boolean;
+  setArcSagitta: (id: string, sagitta: number) => void;
+  flipArc: (id: string) => void;
 }
 
 export const useWallStore = create<WallStore>()(
@@ -72,7 +85,7 @@ export const useWallStore = create<WallStore>()(
     const nextWalls = [...walls];
     const updated = { ...nextWalls[idx], ...patch };
     if (sync && (patch.p1 || patch.p2)) {
-      updated.length_meters = wallLength(updated.p1 || nextWalls[idx].p1, updated.p2 || nextWalls[idx].p2);
+      updated.length_meters = effectiveWallLength(updated);
     }
     if (patch.length_meters != null) {
       // sync point when length changed directly via old action
@@ -85,21 +98,85 @@ export const useWallStore = create<WallStore>()(
     nextWalls[idx] = updated;
     if (JSON.stringify(nextWalls) === JSON.stringify(walls)) return;
     set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+    syncActiveFloor();
+  };
+
+  const DEFAULT_FLOOR_WALLS: Wall[] = [
+    { ...DEFAULT_WALL, id: 'w-1', name: 'W-01', p1: { x: 0, y: 4 }, p2: { x: 5, y: 4 }, length_meters: 5 },
+    { ...DEFAULT_WALL, id: 'w-2', name: 'W-02', p1: { x: 5, y: 4 }, p2: { x: 5, y: 0 }, length_meters: 4 },
+    { ...DEFAULT_WALL, id: 'w-3', name: 'W-03', p1: { x: 5, y: 0 }, p2: { x: 0, y: 0 }, length_meters: 5 },
+    { ...DEFAULT_WALL, id: 'w-4', name: 'W-04', p1: { x: 0, y: 0 }, p2: { x: 0, y: 4 }, length_meters: 4 },
+  ];
+  const DEFAULT_FLOOR_ID = 'f-1';
+
+  // Cermin lantai aktif: walls/rooms/dedupe di root selalu mencerminkan lantai
+  // aktif, sehingga seluruh aksi lama (gambar, undo, snap, kalkulasi) tetap jalan
+  // tanpa diubah. Setiap mutasi dinding/ruangan lalu disalin balik ke lantai aktif.
+  const syncActiveFloor = () => {
+    const st = get();
+    const id = st.activeFloorId ?? DEFAULT_FLOOR_ID;
+    const idx = st.floors.findIndex((f) => f.id === id);
+    if (idx === -1) return;
+    const cur = st.floors[idx];
+    if (JSON.stringify(cur.walls) === JSON.stringify(st.walls) &&
+        JSON.stringify(cur.rooms ?? []) === JSON.stringify(st.rooms ?? []) &&
+        (cur.dedupeOverlap ?? true) === st.dedupeOverlap) return;
+    const next: Floor[] = [...st.floors];
+    next[idx] = { ...cur, walls: st.walls, rooms: st.rooms, dedupeOverlap: st.dedupeOverlap };
+    set({ floors: next });
+  };
+
+  const selectFloorWalls = (floors: Floor[], id: string | null) => {
+    const f = floors.find((x) => x.id === id) ?? floors[0];
+    return { floor: f, walls: f ? f.walls : [], rooms: f?.rooms ?? [], dedupe: f?.dedupeOverlap ?? true, id: f?.id ?? null };
+  };
+
+  // ----- Dinding melengkung -----
+  let lastArcEditId: string | null = null;
+  let lastArcEditAt = 0;
+  const applyArc = (id: string, sagitta: number | undefined, coalesce = false) => {
+    const { walls, selectedId, past } = get();
+    const idx = walls.findIndex((w) => w.id === id);
+    if (idx === -1) return;
+    const w = walls[idx];
+    const chord = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y);
+    let next: Wall;
+    if (sagitta === undefined) {
+      if (w.arc_sagitta_m === undefined) return;
+      const { arc_sagitta_m: _omit, ...rest } = w;
+      next = rest as Wall;
+    } else {
+      const sign = sagitta < 0 ? -1 : 1;
+      const abs = Math.min(chord / 2, Math.max(0.02, Math.round(Math.abs(sagitta) * 100) / 100));
+      const value = sign * abs;
+      if (w.arc_sagitta_m === value) return;
+      next = { ...w, arc_sagitta_m: value };
+    }
+    const nextWalls = [...walls];
+    nextWalls[idx] = next;
+    // Saat busur diseret, gabungkan jadi satu langkah undo (bukan puluhan).
+    const now = Date.now();
+    const merge = coalesce && lastArcEditId === id && now - lastArcEditAt < 600;
+    lastArcEditId = coalesce ? id : null;
+    lastArcEditAt = now;
+    set({
+      walls: nextWalls,
+      past: merge ? past : [...past, { walls, selectedId }].slice(-50),
+      future: [],
+    });
   };
 
   return {
-    walls: [
-      { ...DEFAULT_WALL, id: 'w-1', name: 'W-01', p1: { x: 0, y: 4 }, p2: { x: 5, y: 4 }, length_meters: 5 },
-      { ...DEFAULT_WALL, id: 'w-2', name: 'W-02', p1: { x: 5, y: 4 }, p2: { x: 5, y: 0 }, length_meters: 4 },
-      { ...DEFAULT_WALL, id: 'w-3', name: 'W-03', p1: { x: 5, y: 0 }, p2: { x: 0, y: 0 }, length_meters: 5 },
-      { ...DEFAULT_WALL, id: 'w-4', name: 'W-04', p1: { x: 0, y: 0 }, p2: { x: 0, y: 4 }, length_meters: 4 },
-    ],
+    
+    walls: DEFAULT_FLOOR_WALLS.map((w) => ({ ...w })),
     selectedId: DEFAULT_WALL.id,
     past: [],
     future: [],
     dedupeOverlap: true,
     rooms: [],
-    toggleDedupe: () => set((s) => ({ dedupeOverlap: !s.dedupeOverlap })),
+    floors: [defaultFloor(DEFAULT_FLOOR_ID, 'Lantai 1', DEFAULT_FLOOR_WALLS.map((w) => ({ ...w })), [])],
+    activeFloorId: DEFAULT_FLOOR_ID,
+    toggleDedupe: () => set((s) => ({ dedupeOverlap: !s.dedupeOverlap, floors: s.floors.map((f) => (f.id === (s.activeFloorId ?? 'f-1') ? { ...f, dedupeOverlap: !s.dedupeOverlap } : f)) })),
     setRooms: (rooms) => set({ rooms }),
 
     addWall: () => {
@@ -374,18 +451,140 @@ export const useWallStore = create<WallStore>()(
       });
     },
 
-    reset: () => set({ walls: [
-      { ...DEFAULT_WALL, id: 'w-1', name: 'W-01', p1: { x: 0, y: 4 }, p2: { x: 5, y: 4 }, length_meters: 5 },
-      { ...DEFAULT_WALL, id: 'w-2', name: 'W-02', p1: { x: 5, y: 4 }, p2: { x: 5, y: 0 }, length_meters: 4 },
-      { ...DEFAULT_WALL, id: 'w-3', name: 'W-03', p1: { x: 5, y: 0 }, p2: { x: 0, y: 0 }, length_meters: 5 },
-      { ...DEFAULT_WALL, id: 'w-4', name: 'W-04', p1: { x: 0, y: 0 }, p2: { x: 0, y: 4 }, length_meters: 4 },
-    ], selectedId: 'w-1', past: [], future: [] }),
+    reset: () => {
+      const base = DEFAULT_FLOOR_WALLS.map((w) => ({ ...w, id: `${w.id}-${Date.now()}` }));
+      const f = defaultFloor(DEFAULT_FLOOR_ID, 'Lantai 1', base, []);
+      set({ floors: [f], activeFloorId: DEFAULT_FLOOR_ID, walls: base.map((w) => ({ ...w })), rooms: [], dedupeOverlap: true, selectedId: base[0]?.id ?? 'w-1', past: [], future: [] });
+    },
+
+    setActiveFloor: (id) => {
+      const st = get();
+      if (!st.floors.some((f) => f.id === id)) return;
+      const { floor, walls, rooms, dedupe, id: fid } = selectFloorWalls(st.floors, id);
+      if (!floor) return;
+      set({ activeFloorId: fid, walls: walls.map((w) => ({ ...w })), rooms: (rooms ?? []).map((r) => ({ ...r })), dedupeOverlap: dedupe, selectedId: walls[0]?.id ?? st.selectedId, past: [], future: [] });
+    },
+
+    addFloor: (options) => {
+      const st = get();
+      const n = st.floors.length + 1;
+      const now = Date.now();
+      let walls: Wall[] = [];
+      let rooms: Room[] = [];
+      if (options?.copyFromBelow) {
+        const idx = Math.max(0, st.floors.findIndex((f) => f.id === st.activeFloorId));
+        const below = st.floors[idx] ?? st.floors[st.floors.length - 1];
+        if (below) {
+          walls = (below.walls ?? []).map((w, i) => ({
+            ...w,
+            id: `w-${now}-${i}`,
+            openings: (w.openings ?? []).map((o, j) => ({ ...o, id: `o-${now}-${i}-${j}` })),
+          }));
+          rooms = (below.rooms ?? []).map((r, i) => ({ ...r, id: `r-${now}-${i}` }));
+        }
+      }
+      const f = defaultFloor(`f-${now}`, `Lantai ${n}`, walls, rooms);
+      const next = [...st.floors, f];
+      set({ floors: next, activeFloorId: f.id, walls: walls.map((w) => ({ ...w })), rooms: rooms.map((r) => ({ ...r })), selectedId: walls[0]?.id ?? st.selectedId, past: [], future: [] });
+    },
+
+    removeFloor: (id) => {
+      const st = get();
+      if (st.floors.length <= 1) return;
+      const next = st.floors.filter((f) => f.id !== id);
+      const wasActive = st.activeFloorId === id;
+      const { walls, rooms, dedupe, id: fid } = selectFloorWalls(next, wasActive ? next[next.length - 1]?.id ?? null : st.activeFloorId);
+      set({ floors: next, activeFloorId: fid, walls: walls.map((w) => ({ ...w })), rooms: (rooms ?? []).map((r) => ({ ...r })), dedupeOverlap: dedupe, selectedId: walls[0]?.id ?? st.selectedId, past: [], future: [] });
+    },
+
+    renameFloor: (id, name) => {
+      const st = get();
+      set({ floors: st.floors.map((f) => (f.id === id ? { ...f, name } : f)) });
+    },
+
+    setFloorHeight: (id, h) => {
+      const st = get();
+      const v = Math.min(10, Math.max(2, Math.round(h * 100) / 100));
+      if (!Number.isFinite(v)) return;
+      set({ floors: st.floors.map((f) => (f.id === id ? { ...f, height_meters: v } : f)) });
+    },
+
+    loadFloors: (floors, activeFloorId) => {
+      const list = (floors && floors.length > 0 ? floors : [defaultFloor(DEFAULT_FLOOR_ID, 'Lantai 1', [], [])])
+        .map((f, i) => ({ ...f, id: f.id || `f-${i + 1}`, name: f.name || `Lantai ${i + 1}`, rooms: f.rooms ?? [], dedupeOverlap: f.dedupeOverlap ?? true }));
+      const { walls, rooms, dedupe, id: fid } = selectFloorWalls(list, activeFloorId ?? null);
+      set({ floors: list, activeFloorId: fid, walls: walls.map((w) => ({ ...w })), rooms: (rooms ?? []).map((r) => ({ ...r })), dedupeOverlap: dedupe, selectedId: walls[0]?.id ?? get().selectedId, past: [], future: [] });
+    },
+
+    // ===== Dinding melengkung =====
+    // length_meters selalu = panjang busur (bukan tali) agar luas & RAB benar.
+    toggleArc: (id, curved) => {
+      const { walls, selectedId, past } = get();
+      const idx = walls.findIndex((w) => w.id === id);
+      if (idx === -1) return;
+      const w = walls[idx];
+      const nextWalls = [...walls];
+      if (!curved) {
+        nextWalls[idx] = { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) };
+      } else {
+        const c = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y);
+        const sag = Math.round((c * 0.15 + 0.1) * 100) / 100;
+        nextWalls[idx] = { ...w, arc_sagitta_m: sag, length_meters: arcLength(w.p1, w.p2, sag) };
+      }
+      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+    },
+
+    setArcRadius: (id, radius) => {
+      const { walls, selectedId, past } = get();
+      const idx = walls.findIndex((w) => w.id === id);
+      if (idx === -1) return false;
+      const w = walls[idx];
+      // Validasi: radius minimum = setengah jarak antar ujung.
+      const min = minRadius(w.p1, w.p2);
+      if (!(radius >= min - 1e-9)) return false;
+      const prev = w.arc_sagitta_m || 0;
+      const sign = prev < 0 ? -1 : 1;
+      const sag = sagittaFromRadius(w.p1, w.p2, radius);
+      if (sag == null) return false;
+      const nextWalls = [...walls];
+      nextWalls[idx] = { ...w, arc_sagitta_m: Math.round(sign * sag * 100) / 100, length_meters: arcLength(w.p1, w.p2, sag) };
+      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+      return true;
+    },
+
+    setArcSagitta: (id, sagitta) => {
+      const { walls, selectedId, past } = get();
+      const idx = walls.findIndex((w) => w.id === id);
+      if (idx === -1) return;
+      const w = walls[idx];
+      const s = Math.round(sagitta * 100) / 100;
+      if (Math.abs(s) < 0.01) {
+        const nextWalls = [...walls];
+        nextWalls[idx] = { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) };
+        set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+        return;
+      }
+      const nextWalls = [...walls];
+      nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: arcLength(w.p1, w.p2, s) };
+      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+    },
+
+    flipArc: (id) => {
+      const { walls, selectedId, past } = get();
+      const idx = walls.findIndex((w) => w.id === id);
+      if (idx === -1) return;
+      const w = walls[idx];
+      const s = -(w.arc_sagitta_m || 0);
+      const nextWalls = [...walls];
+      nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: Math.abs(s) < 1e-9 ? wallLength(w.p1, w.p2) : arcLength(w.p1, w.p2, s) };
+      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+    },
   };
 }, {
   name: 'floorplan-wall-draft-v2',
   storage: createJSONStorage(() => AsyncStorage),
-  partialize: (s) => ({ walls: s.walls, selectedId: s.selectedId, dedupeOverlap: s.dedupeOverlap, rooms: s.rooms }),
-  version: 3,
+  partialize: (s) => ({ walls: s.walls, selectedId: s.selectedId, dedupeOverlap: s.dedupeOverlap, rooms: s.rooms, floors: s.floors, activeFloorId: s.activeFloorId }),
+  version: 4,
   migrate: (persistedState: any, version: number) => {
     if (version < 2 && persistedState && Array.isArray(persistedState.walls)) {
       persistedState.walls = persistedState.walls.map((w: any, i: number) => {
@@ -411,6 +610,18 @@ export const useWallStore = create<WallStore>()(
         return { ...w, openings: newOpenings };
       });
     }
+    if (version < 4 && persistedState) {
+      const rawFloors = Array.isArray((persistedState as any).floors) ? (persistedState as any).floors : null;
+      if (rawFloors && rawFloors.length > 0) {
+        (persistedState as any).activeFloorId = (persistedState as any).activeFloorId || rawFloors[0]?.id || 'f-1';
+      } else {
+        const walls = Array.isArray((persistedState as any).walls) ? (persistedState as any).walls : [];
+        const rooms = Array.isArray((persistedState as any).rooms) ? (persistedState as any).rooms : [];
+        const f = { id: 'f-1', name: 'Lantai 1', height_meters: 3.2, walls, rooms, dedupeOverlap: (persistedState as any).dedupeOverlap ?? true };
+        (persistedState as any).floors = [f];
+        (persistedState as any).activeFloorId = 'f-1';
+      }
+    }
     return persistedState;
   },
 }));
@@ -420,3 +631,34 @@ export const selectArea = (s: WallStore) => {
   const w = s.walls.find((x) => x.id === s.selectedId) || s.walls[0];
   return w ? w.length_meters * w.height_meters : 0;
 };
+
+/** Lantai di bawah lantai aktif (untuk ghost overlay di kanvas). */
+export const selectFloorBelow = (s: WallStore): Floor | null => {
+  const idx = s.floors.findIndex((f) => f.id === s.activeFloorId);
+  if (idx > 0) return s.floors[idx - 1];
+  return null;
+};
+
+// Sinkronisasi otomatis: setiap perubahan walls/rooms/dedupe di root disalin
+// balik ke lantai aktif. Ini yang membuat seluruh aksi lama (gambar, undo,
+// snap, kalkulasi) otomatis per-lantai tanpa mengubah tiap aksi satu per satu.
+let syncingFloors = false;
+useWallStore.subscribe((st, prev) => {
+  if (syncingFloors) return;
+  if (st.walls === prev.walls && st.rooms === prev.rooms && st.dedupeOverlap === prev.dedupeOverlap) return;
+  const id = st.activeFloorId ?? 'f-1';
+  const idx = st.floors.findIndex((f) => f.id === id);
+  if (idx === -1) return;
+  const cur = st.floors[idx];
+  if (JSON.stringify(cur.walls) === JSON.stringify(st.walls) &&
+      JSON.stringify(cur.rooms ?? []) === JSON.stringify(st.rooms ?? []) &&
+      (cur.dedupeOverlap ?? true) === st.dedupeOverlap) return;
+  syncingFloors = true;
+  try {
+    const next = [...st.floors];
+    next[idx] = { ...cur, walls: st.walls, rooms: st.rooms, dedupeOverlap: st.dedupeOverlap };
+    useWallStore.setState({ floors: next });
+  } finally {
+    syncingFloors = false;
+  }
+});

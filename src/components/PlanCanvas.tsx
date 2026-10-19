@@ -1,10 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { PanResponder, View, Alert, Platform, Pressable, Text as RNText, useWindowDimensions } from 'react-native';
-import Svg, { Circle, G, Line, Text as SVGText, Rect } from 'react-native-svg';
-import { useWallStore, selectActiveWall } from '../store/wallStore';
+import Svg, { Circle, G, Line, Path, Text as SVGText, Rect } from 'react-native-svg';
+import { useWallStore, selectActiveWall, selectFloorBelow } from '../store/wallStore';
 import { C } from '../theme';
 import { openingGeometry } from '../utils/openings';
-import { snapToGrid, snapOrthogonal, distancePointToSegment, wallLength, nearestPoint, normalizePointsEqual, distance } from '../utils/geometry';
+import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath } from '../utils/geometry';
 import type { Point } from '../types';
 
 const GRID_STEP = 1;
@@ -16,11 +16,16 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
   const walls = useWallStore((s) => s.walls);
   const selectedId = useWallStore((s) => s.selectedId);
   const rooms = useWallStore((s) => s.rooms);
+  // Bayangan lantai bawah (ghost): hanya untuk acuan visual, tidak bisa dipilih/diedit.
+  const floorBelow = useWallStore((s) => selectFloorBelow(s));
+  const ghostWalls = floorBelow?.walls ?? [];
   const selectWall = useWallStore((s) => s.selectWall);
   const addWallAt = useWallStore((s) => s.addWallAt);
   const moveVertex = useWallStore((s) => s.moveVertex);
   const removeWall = useWallStore((s) => s.removeWall);
   const setWallLength = useWallStore((s) => s.setWallLength);
+
+  const setArcSagitta = useWallStore((s) => s.setArcSagitta);
 
   const [scale, setScale] = useState(50);
   const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
@@ -31,7 +36,7 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
   const [snapGrid, setSnapGrid] = useState(true);
   const [snapOrtho, setSnapOrtho] = useState(true);
   const [magnetOn, setMagnetOn] = useState(true);
-  const [mode, setMode] = useState<'none' | 'pan' | 'dragVertex' | 'draw' | 'deleteTap'>('none');
+  const [mode, setMode] = useState<'none' | 'pan' | 'dragVertex' | 'draw' | 'deleteTap' | 'dragArc'>('none');
   const [prestart, setPrestart] = useState<Point | null>(null);
   const [preend, setPreend] = useState<Point | null>(null);
   const [dragVertexPoint, setDragVertexPoint] = useState<Point | null>(null);
@@ -53,6 +58,7 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
   const preendRef = useRef(preend);
   const dragVertexPointRef = useRef(dragVertexPoint);
   const dragVertexWallIdRef = useRef(dragVertexWallId);
+  const dragArcWallIdRef = useRef<string | null>(null);
   const canvasWRef = useRef(canvasW);
   const canvasHRef = useRef(canvasH);
 
@@ -223,17 +229,27 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         return;
       }
       // Mode Pilih: sentuh dinding = pilih/geser titik; area kosong = pan.
+      // Dinding lengkung diukur ke busur (bukan tali) agar mudah disentuh.
       if (toolRef.current === 'select') {
         // try select wall by line proximity
         let best: { w: typeof walls[0]; d: number } | null = null;
         for (const w of wallsRef.current) {
-          const d = distancePointToSegment(wpt, w.p1, w.p2);
+          const d = (w.arc_sagitta_m ? distancePointToArc(wpt, w.p1, w.p2, w.arc_sagitta_m) : distancePointToSegment(wpt, w.p1, w.p2));
           if (d < 0.35) { // ~35 px at 50 scale? use world distance ~0.35m ~ 17px
             if (!best || d < best.d) best = { w, d };
           }
         }
         if (best) {
           selectWall(best.w.id);
+          // Handle busur: seret puncak untuk mengubah kelengkungan (dinding lengkung terpilih).
+          if (best.w.arc_sagitta_m) {
+            const apex = arcApex(best.w.p1, best.w.p2, best.w.arc_sagitta_m);
+            if (distance(wpt, apex) < 0.35) {
+              dragArcWallIdRef.current = best.w.id;
+              modeRef.current = 'dragArc'; setMode('dragArc');
+              return;
+            }
+          }
           // try drag vertex if near endpoint
           const nearP1 = distance(wpt, best.w.p1) < 0.25;
           const nearP2 = distance(wpt, best.w.p2) < 0.25;
@@ -286,8 +302,24 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
           // only update preview, commit on release
           dragVertexPointRef.current = p; setDragVertexPoint(p);
         }
+      } else if (modeRef.current === 'dragArc') {
+        // Seret puncak busur: proyeksikan jari ke normal tali → sagitta baru.
+        const id = dragArcWallIdRef.current;
+        const w = id ? wallsRef.current.find((x) => x.id === id) : undefined;
+        if (w) {
+          const wpt = toWorld(gs.moveX, gs.moveY);
+          const c = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y) || 1;
+          const mx = (w.p1.x + w.p2.x) / 2;
+          const my = (w.p1.y + w.p2.y) / 2;
+          const nx = -(w.p2.y - w.p1.y) / c;
+          const ny = (w.p2.x - w.p1.x) / c;
+          const proj = (wpt.x - mx) * nx + (wpt.y - my) * ny;
+          setArcSagitta(w.id, Math.round(proj * 100) / 100);
+        }
       }
     },
+
+
     onPanResponderRelease: (e, gs) => {
       if (modeRef.current === 'draw') {
         if (prestartRef.current && preendRef.current) {
@@ -314,6 +346,12 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         modeRef.current = 'none'; setMode('none');
         return;
       }
+      if (modeRef.current === 'dragArc') {
+        dragArcWallIdRef.current = null;
+        modeRef.current = 'none'; setMode('none');
+        setUserAdjusted(true);
+        return;
+      }
       if (modeRef.current === 'dragVertex') {
         const wpt = toWorld(e.nativeEvent.locationX, e.nativeEvent.locationY);
         let p = snapGridRef.current ? snapToGrid(wpt, 0.1) : wpt;
@@ -335,7 +373,7 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
       if (modeRef.current === 'deleteTap') {
         const wpt = toWorld(e.nativeEvent.locationX, e.nativeEvent.locationY);
         for (const w of wallsRef.current) {
-          if (distancePointToSegment(wpt, w.p1, w.p2) < 0.35) {
+          if ((w.arc_sagitta_m ? distancePointToArc(wpt, w.p1, w.p2, w.arc_sagitta_m) : distancePointToSegment(wpt, w.p1, w.p2)) < 0.35) {
             Alert.alert('Hapus dinding', `Hapus ${w.name}?`, [
               { text: 'Batal', style: 'cancel' },
               { text: 'Hapus', onPress: () => removeWall(w.id), style: 'destructive' },
@@ -415,19 +453,41 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
               <Line key={`h${i}`} x1={0} y1={i * scale + offset.y} x2={viewW} y2={i * scale + offset.y} stroke={i % 5 === 0 ? '#334155' : '#1e293b'} strokeWidth={i % 5 === 0 ? 0.8 : 0.3} />
             ))}
           </G>
+          {/* ghost lantai bawah: bayangan samar, tidak interaktif */}
+          {ghostWalls.map((w) => {
+            const s1 = ptScreen(w.p1);
+            const s2 = ptScreen(w.p2);
+            return (
+              <G key={'ghost-' + w.id} opacity={0.28}>
+                <Line x1={s1.x} y1={s1.y} x2={s2.x} y2={s2.y} stroke="#64748b" strokeWidth={3} strokeDasharray="6 4" strokeLinecap="round" />
+              </G>
+            );
+          })}
           {/* walls */}
           {walls.map((w) => {
             const s1 = ptScreen(w.p1);
             const s2 = ptScreen(w.p2);
             const isSel = w.id === selectedId;
+            const sag = w.arc_sagitta_m || 0;
+            const curved = Math.abs(sag) >= 1e-9;
+            const arcLen = curved ? effectiveWallLength(w) : w.length_meters;
+            const apexS = curved ? ptScreen(arcApex(w.p1, w.p2, sag)) : null;
             return (
               <G key={w.id}>
-                <Line x1={s1.x} y1={s1.y} x2={s2.x} y2={s2.y} stroke={isSel ? '#f97316' : '#89ceff'} strokeWidth={isSel ? 6 : 4} strokeLinecap="round" />
+                {curved ? (
+                  <Path d={arcPath(w.p1, w.p2, sag, ptScreen)} fill="none" stroke={isSel ? '#f97316' : '#89ceff'} strokeWidth={isSel ? 6 : 4} strokeLinecap="round" />
+                ) : (
+                  <Line x1={s1.x} y1={s1.y} x2={s2.x} y2={s2.y} stroke={isSel ? '#f97316' : '#89ceff'} strokeWidth={isSel ? 6 : 4} strokeLinecap="round" />
+                )}
                 {/* endpoints */}
                 <Circle cx={s1.x} cy={s1.y} r={VERTEX_R} fill={isSel ? '#f97316' : '#89ceff'} />
                 <Circle cx={s2.x} cy={s2.y} r={VERTEX_R} fill={isSel ? '#f97316' : '#89ceff'} />
-                {/* label length */}
-                <SVGText x={(s1.x + s2.x) / 2} y={(s1.y + s2.y) / 2 - 6} fill="#fff" fontSize="10" textAnchor="middle" fontWeight="600">{w.length_meters.toFixed(2)} m</SVGText>
+                {/* handle tengah busur: seret untuk ubah kelengkungan */}
+                {curved && isSel && apexS && (
+                  <Circle cx={apexS.x} cy={apexS.y} r={10} fill="#4ade80" stroke="#0b1021" strokeWidth={2} />
+                )}
+                {/* label length: panjang busur untuk dinding lengkung */}
+                <SVGText x={(s1.x + s2.x) / 2} y={(s1.y + s2.y) / 2 - 6} fill="#fff" fontSize="10" textAnchor="middle" fontWeight="600">{arcLen.toFixed(2)} m</SVGText>
                 {/* label name near selected */}
                 {isSel && (
                   <SVGText x={(s1.x + s2.x) / 2} y={(s1.y + s2.y) / 2 + 10} fill="#f97316" fontSize="9" textAnchor="middle">{w.name}</SVGText>

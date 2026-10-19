@@ -1,5 +1,5 @@
 import type { Wall, Opening, Point } from '../types';
-import { distance, normalizePointsEqual } from './geometry';
+import { distance, normalizePointsEqual, pointAtArcDistance } from './geometry';
 
 export const MARGIN = 0.1;
 export const MIN_GAP = 0.05;
@@ -41,8 +41,24 @@ export function clampOffset(wall: Wall, o: Opening, offset: number, others: Open
 
 export function openingGeometry(wall: Wall, o: Opening) {
   const len = wall.length_meters;
+  const sag = wall.arc_sagitta_m || 0;
   const p1 = wall.p1;
   const p2 = wall.p2;
+  // Dinding lengkung: titik bukaan mengikuti busur (offset = jarak busur dari p1).
+  if (sag && Math.abs(sag) >= 1e-9) {
+    const halfW = o.width_meters / 2;
+    const halfH = o.height_meters / 2;
+    const s = Math.max(0, o.offset_meters - halfW);
+    const e = Math.min(len, o.offset_meters + halfW);
+    const startWorld = pointAtArcDistance(p1, p2, sag, s);
+    const endWorld = pointAtArcDistance(p1, p2, sag, e);
+    const center = pointAtArcDistance(p1, p2, sag, o.offset_meters);
+    const dx = endWorld.x - startWorld.x;
+    const dy = endWorld.y - startWorld.y;
+    const t = Math.hypot(dx, dy) || 1;
+    const perp = { x: -dy / t, y: dx / t };
+    return { startWorld, endWorld, perp, center, halfW, halfH };
+  }
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
   const total = Math.hypot(dx, dy) || 1;

@@ -93,3 +93,135 @@ export function findFreeOrigin(walls: { p1: Point; p2: Point }[], gap = 1): Poin
   }
   return { x: maxX + gap, y: minY };
 }
+
+// ===== Dinding melengkung (busur lingkaran) =====
+// Busur didefinisikan oleh p1, p2, dan sagitta h (tinggi busur dari tali ke puncak).
+// h > 0 = cembung ke kiri arah p1→p2; h < 0 = cembung ke kanan; h = 0 = lurus.
+
+/** Jarak tali (chord) p1-p2. */
+export function chordLength(p1: Point, p2: Point): number {
+  return distance(p1, p2);
+}
+
+/** Radius minimum = setengah jarak antar ujung (setengah lingkaran). */
+export function minRadius(p1: Point, p2: Point): number {
+  return chordLength(p1, p2) / 2;
+}
+
+/** Radius dari chord c dan sagitta h: R = (h² + (c/2)²) / (2|h|). h=0 → Infinity. */
+export function radiusFromSagitta(p1: Point, p2: Point, sagitta: number): number {
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return Infinity;
+  const c = chordLength(p1, p2);
+  return ((sagitta * sagitta) + (c / 2) * (c / 2)) / (2 * Math.abs(sagitta));
+}
+
+/** Sagitta dari radius R: h = R − √(R² − (c/2)²). Null bila R < c/2 (tidak valid). */
+export function sagittaFromRadius(p1: Point, p2: Point, radius: number): number | null {
+  const c = chordLength(p1, p2);
+  if (!(radius > 0) || radius < c / 2 - 1e-9) return null;
+  return radius - Math.sqrt(Math.max(0, radius * radius - (c / 2) * (c / 2)));
+}
+
+/** Panjang busur dari chord c dan sagitta h. h=0 → panjang tali. */
+export function arcLength(p1: Point, p2: Point, sagitta: number): number {
+  const c = chordLength(p1, p2);
+  if (!sagitta || Math.abs(sagitta) < 1e-9 || c < 1e-9) return Math.round(c * 100) / 100;
+  const R = radiusFromSagitta(p1, p2, sagitta);
+  const theta = 2 * Math.asin(Math.min(1, (c / 2) / R));
+  return Math.round(R * theta * 100) / 100;
+}
+
+/** Pusat lingkaran busur. Null bila lurus. */
+export function arcCenter(p1: Point, p2: Point, sagitta: number): Point | null {
+  const c = chordLength(p1, p2);
+  if (!sagitta || Math.abs(sagitta) < 1e-9 || c < 1e-9) return null;
+  const R = radiusFromSagitta(p1, p2, sagitta);
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const nx = -(p2.y - p1.y) / c;
+  const ny = (p2.x - p1.x) / c;
+  // Pusat berada di sisi berlawanan dari tonjolan busur.
+  const dist = R - Math.abs(sagitta);
+  const s = sagitta > 0 ? 1 : -1;
+  return { x: mx - s * nx * dist, y: my - s * ny * dist };
+}
+
+/** Titik puncak busur (tengah tali + sagitta). */
+export function arcApex(p1: Point, p2: Point, sagitta: number): Point {
+  const c = chordLength(p1, p2);
+  if (c < 1e-9) return { ...p1 };
+  const mx = (p1.x + p2.x) / 2;
+  const my = (p1.y + p2.y) / 2;
+  const nx = -(p2.y - p1.y) / c;
+  const ny = (p2.x - p1.x) / c;
+  return { x: mx + nx * sagitta, y: my + ny * sagitta };
+}
+
+/** Path SVG busur lewat titik-titik layar (flag sweep mengikuti tanda sagitta). */
+export function arcPath(p1: Point, p2: Point, sagitta: number, toScreen: (p: Point) => Point): string {
+  const a = toScreen(p1);
+  const b = toScreen(p2);
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  const c = chordLength(p1, p2);
+  const R = radiusFromSagitta(p1, p2, sagitta);
+  if (!Number.isFinite(R) || R <= 0 || c < 1e-9) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  const chordPx = Math.hypot(b.x - a.x, b.y - a.y);
+  const Rp = (R * chordPx) / c;
+  const theta = 2 * Math.asin(Math.min(1, (c / 2) / R));
+  const largeArc = theta > Math.PI ? 1 : 0;
+  // Puncak busur = tengah tali + n*sagitta (n = normal kiri arah p1→p2 dalam
+  // koordinat kanvas); sweep dipilih agar busur melewati puncak tersebut.
+  const sweep = sagitta > 0 ? 1 : 0;
+  return `M ${a.x} ${a.y} A ${Rp} ${Rp} 0 ${largeArc} ${sweep} ${b.x} ${b.y}`;
+}
+
+/** Jarak titik ke busur (proyeksi radial bila dalam rentang sudut, ujung bila di luar). */
+export function distancePointToArc(p: Point, a: Point, b: Point, sagitta: number): number {
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return distancePointToSegment(p, a, b);
+  const center = arcCenter(a, b, sagitta);
+  if (!center) return distancePointToSegment(p, a, b);
+  const R = radiusFromSagitta(a, b, sagitta);
+  const radial = Math.abs(distance(p, center) - R);
+  const norm = (t: number) => {
+    while (t < 0) t += Math.PI * 2;
+    while (t >= Math.PI * 2) t -= Math.PI * 2;
+    return t;
+  };
+  // Busur dari a ke b: tanda sagitta menentukan arah putaran.
+  // sagitta > 0 (tonjolan kiri arah a→b) = putaran CCW di koordinat dunia y-ke-atas.
+  const ccw = sagitta > 0;
+  const a1 = norm(Math.atan2(a.y - center.y, a.x - center.x));
+  const a2 = norm(Math.atan2(b.y - center.y, b.x - center.x));
+  const ap = norm(Math.atan2(p.y - center.y, p.x - center.x));
+  const span = ccw ? norm(a2 - a1) : norm(a1 - a2);
+  const rel = ccw ? norm(ap - a1) : norm(a1 - ap);
+  if (rel <= span) return radial;
+  return Math.min(distance(p, a), distance(p, b));
+}
+
+/** Titik pada busur pada jarak s meter dari p1 (untuk bukaan pintu/jendela). */
+export function pointAtArcDistance(a: Point, b: Point, sagitta: number, s: number): Point {
+  const c = chordLength(a, b);
+  if (!sagitta || Math.abs(sagitta) < 1e-9 || c < 1e-9) {
+    const t = Math.max(0, Math.min(1, s / Math.max(1e-9, c)));
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+  const R = radiusFromSagitta(a, b, sagitta);
+  const center = arcCenter(a, b, sagitta);
+  if (!center || !Number.isFinite(R)) return { ...a };
+  const startAng = Math.atan2(a.y - center.y, a.x - center.x);
+  let delta = Math.atan2(b.y - center.y, b.x - center.x) - startAng;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  const total = Math.abs(R * delta);
+  const t = Math.max(0, Math.min(1, s / Math.max(1e-9, total)));
+  const ang = startAng + delta * t;
+  return { x: center.x + R * Math.cos(ang), y: center.y + R * Math.sin(ang) };
+}
+
+/** Panjang efektif dinding: busur bila melengkung, tali bila lurus. */
+export function effectiveWallLength(w: { p1: Point; p2: Point; arc_sagitta_m?: number }): number {
+  const s = w.arc_sagitta_m || 0;
+  if (!s || Math.abs(s) < 1e-9) return wallLength(w.p1, w.p2);
+  return arcLength(w.p1, w.p2, s);
+}

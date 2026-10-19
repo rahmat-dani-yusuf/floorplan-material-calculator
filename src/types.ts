@@ -27,6 +27,8 @@ export interface WallState {
   brick_type: BrickType;
   mortar_ratio: MortarRatio;
   openings: Opening[];
+  /** Tinggi busur (sagitta, meter). 0/undefined = lurus. >0 cembung kiri, <0 kanan. */
+  arc_sagitta_m?: number;
 }
 
 /** Hasil hitung kuantitas (belum berharga). */
@@ -81,6 +83,8 @@ export interface Project {
   updatedAt: number;
   rooms?: any[];
   dedupeOverlap?: boolean;
+  floors?: Floor[];
+  activeFloorId?: string;
 }
 
 export interface Room {
@@ -89,9 +93,56 @@ export interface Room {
   seed: Point;
 }
 
+/** Satu lantai dalam proyek bertingkat. */
+export interface Floor {
+  id: string;
+  name: string;
+  height_meters: number;
+  walls: Wall[];
+  rooms?: Room[];
+  dedupeOverlap?: boolean;
+}
+
 export interface ProjectSummary {
   perWall: CostSummary[];
   line_items: CostLineItem[];
   total_area_m2: number;
   grand_total: number;
+}
+
+/** Ringkasan kalkulasi satu lantai + gabungan semua lantai. */
+export interface FloorSummary {
+  floorId: string;
+  floorName: string;
+  wallCount: number;
+  summary: ProjectSummary;
+}
+
+export interface MultiFloorSummary {
+  perFloor: FloorSummary[];
+  total_area_m2: number;
+  grand_total: number;
+}
+
+/** Bangun objek lantai default. */
+export function defaultFloor(id: string, name: string, walls: Wall[] = [], rooms: Room[] = []): Floor {
+  return { id, name, height_meters: 3.2, walls, rooms };
+}
+
+let floorSeq = 0;
+
+/** Migrasi proyek lama (tanpa floors) menjadi 1 lantai. */
+export function migrateProjectFloors(p: any): Floor[] {
+  if (p && Array.isArray(p.floors) && p.floors.length > 0) {
+    return p.floors.map((f: any, i: number) => ({
+      id: f.id || `f-${i + 1}`,
+      name: f.name || `Lantai ${i + 1}`,
+      height_meters: Number(f.height_meters) > 0 ? Number(f.height_meters) : 3.2,
+      walls: Array.isArray(f.walls) ? f.walls : [],
+      rooms: Array.isArray(f.rooms) ? f.rooms : [],
+      dedupeOverlap: f.dedupeOverlap ?? p.dedupeOverlap ?? true,
+    }));
+  }
+  floorSeq += 1;
+  return [defaultFloor(`f-${Date.now()}-${floorSeq}`, 'Lantai 1', p?.walls || [], p?.rooms || [])];
 }
