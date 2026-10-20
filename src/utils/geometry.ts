@@ -174,7 +174,7 @@ export function arcSegmentPath(a: Point, b: Point, sagitta: number, s0: number, 
   const Rp = R * k;
   const span = arcSpanForWidth(a, b, sagitta, Math.abs(s1 - s0));
   const largeArc = span > Math.PI ? 1 : 0;
-  const sweep = sagitta > 0 ? 1 : 0;
+  const sweep = sagitta > 0 ? 0 : 1;
   return `M ${A.x} ${A.y} A ${Rp} ${Rp} 0 ${largeArc} ${sweep} ${B.x} ${B.y}`;
 }
 
@@ -215,7 +215,7 @@ export function arcPath(p1: Point, p2: Point, sagitta: number, toScreen: (p: Poi
   const largeArc = theta > Math.PI ? 1 : 0;
   // Puncak busur = tengah tali + n*sagitta (n = normal kiri arah p1→p2 dalam
   // koordinat kanvas); sweep dipilih agar busur melewati puncak tersebut.
-  const sweep = sagitta > 0 ? 1 : 0;
+  const sweep = sagitta > 0 ? 0 : 1;
   return `M ${a.x} ${a.y} A ${Rp} ${Rp} 0 ${largeArc} ${sweep} ${b.x} ${b.y}`;
 }
 
@@ -233,7 +233,7 @@ export function distancePointToArc(p: Point, a: Point, b: Point, sagitta: number
   };
   // Busur dari a ke b: tanda sagitta menentukan arah putaran.
   // sagitta > 0 (tonjolan kiri arah a→b) = putaran CCW di koordinat dunia y-ke-atas.
-  const ccw = sagitta > 0;
+  const ccw = sagitta < 0;
   const a1 = norm(Math.atan2(a.y - center.y, a.x - center.x));
   const a2 = norm(Math.atan2(b.y - center.y, b.x - center.x));
   const ap = norm(Math.atan2(p.y - center.y, p.x - center.x));
