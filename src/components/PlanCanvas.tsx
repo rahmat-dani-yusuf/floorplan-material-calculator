@@ -4,7 +4,7 @@ import Svg, { Circle, G, Line, Path, Text as SVGText, Rect } from 'react-native-
 import { useWallStore, selectActiveWall, selectFloorBelow } from '../store/wallStore';
 import { C } from '../theme';
 import { openingGeometry } from '../utils/openings';
-import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath, arcSegmentPath, doorLeafPath } from '../utils/geometry';
+import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath, arcSegmentPath, doorLeafPath, attachedArcForPoint, projectPointToCurve } from '../utils/geometry';
 import type { Point } from '../types';
 
 const GRID_STEP = 1;
@@ -59,6 +59,8 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
   const dragVertexPointRef = useRef(dragVertexPoint);
   const dragVertexWallIdRef = useRef(dragVertexWallId);
   const dragArcWallIdRef = useRef<string | null>(null);
+  // Busur yang ditempeli titik vertex yang sedang diseret (agar tak lepas saat drag).
+  const dragArcStickRef = useRef<{ p1: Point; p2: Point; arc_sagitta_m?: number } | null>(null);
   const canvasWRef = useRef(canvasW);
   const canvasHRef = useRef(canvasH);
 
@@ -277,6 +279,7 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
             const vp = nearP1 ? best.w.p1 : best.w.p2;
             dragVertexPointRef.current = vp; setDragVertexPoint(vp);
             dragVertexWallIdRef.current = best.w.id; setDragVertexWallId(best.w.id);
+            dragArcStickRef.current = attachedArcForPoint(wallsRef.current, vp);
             modeRef.current = 'dragVertex'; setMode('dragVertex');
             return;
           }
@@ -317,6 +320,12 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
           setSnapTarget(p);
         } else {
           setSnapTarget(null);
+        }
+        // Titik tempelan busur dijepit sepanjang busur secara live (tak boleh lepas).
+        const stick = dragArcStickRef.current;
+        if (stick) {
+          p = projectPointToCurve(p, stick.p1, stick.p2, stick.arc_sagitta_m || 0);
+          p = { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 };
         }
         if (dragVertexPointRef.current && dragVertexWallIdRef.current) {
           // only update preview, commit on release
@@ -380,11 +389,17 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         }
         const near = nearestPoint(p, allPointsRef.current, 0.3);
         if (near) p = near;
+        const stick = dragArcStickRef.current;
+        if (stick) {
+          p = projectPointToCurve(p, stick.p1, stick.p2, stick.arc_sagitta_m || 0);
+          p = { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 };
+        }
         if (dragVertexPointRef.current && dragVertexWallIdRef.current) {
           moveVertex(dragVertexPointRef.current, p);
         }
         dragVertexPointRef.current = null; setDragVertexPoint(null);
         dragVertexWallIdRef.current = null; setDragVertexWallId(null);
+        dragArcStickRef.current = null;
         setSnapTarget(null);
         modeRef.current = 'none'; setMode('none');
         setUserAdjusted(true);

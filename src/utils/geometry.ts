@@ -301,3 +301,107 @@ export function effectiveWallLength(w: { p1: Point; p2: Point; arc_sagitta_m?: n
   if (!s || Math.abs(s) < 1e-9) return wallLength(w.p1, w.p2);
   return arcLength(w.p1, w.p2, s);
 }
+
+/** Toleransi titik menempel pada kurva busur/tali (meter). */
+export const ARC_ATTACH_TOL = 0.02;
+
+/** Jarak titik ke kurva dinding (busur bila melengkung, tali bila lurus). */
+export function distanceToCurve(p: Point, p1: Point, p2: Point, sagitta: number): number {
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return distancePointToSegment(p, p1, p2);
+  return distancePointToArc(p, p1, p2, sagitta);
+}
+
+/** Proyeksikan titik ke kurva (busur/tali), dijepit dalam rentang kurva. */
+export function projectPointToCurve(p: Point, p1: Point, p2: Point, sagitta: number): Point {
+  const c = chordLength(p1, p2);
+  if (!sagitta || Math.abs(sagitta) < 1e-9 || c < 1e-9) {
+    const dx = p2.x - p1.x; const dy = p2.y - p1.y;
+    const ab2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - p1.x) * dx + (p.y - p1.y) * dy) / ab2));
+    return { x: p1.x + dx * t, y: p1.y + dy * t };
+  }
+  const center = arcCenter(p1, p2, sagitta);
+  const R = radiusFromSagitta(p1, p2, sagitta);
+  if (!center || !Number.isFinite(R) || R < 1e-9) return { ...p1 };
+  const vx = p.x - center.x; const vy = p.y - center.y;
+  if (Math.hypot(vx, vy) < 1e-9) return arcApex(p1, p2, sagitta);
+  const norm = (t: number) => {
+    while (t < 0) t += Math.PI * 2;
+    while (t >= Math.PI * 2) t -= Math.PI * 2;
+    return t;
+  };
+  const ccw = sagitta < 0;
+  const a1 = norm(Math.atan2(p1.y - center.y, p1.x - center.x));
+  const a2 = norm(Math.atan2(p2.y - center.y, p2.x - center.x));
+  const ap = norm(Math.atan2(vy, vx));
+  const span = ccw ? norm(a2 - a1) : norm(a1 - a2);
+  const rel = ccw ? norm(ap - a1) : norm(a1 - ap);
+  let ang = ap;
+  if (rel > span) {
+    // Jepit ke ujung busur terdekat.
+    const toStart = Math.min(rel, Math.PI * 2 - rel);
+    const dEnd = Math.abs(rel - span);
+    const toEnd = Math.min(dEnd, Math.PI * 2 - dEnd);
+    ang = toStart <= toEnd ? a1 : a2;
+  }
+  return { x: center.x + R * Math.cos(ang), y: center.y + R * Math.sin(ang) };
+}
+
+/** Perpotongan sinar (origin + t·dir, t ≥ 0) dengan kurva. Null bila tak ada. */
+export function intersectRayWithCurve(origin: Point, dir: Point, p1: Point, p2: Point, sagitta: number): Point | null {
+  const curved = sagitta && Math.abs(sagitta) >= 1e-9;
+  if (!curved) {
+    const ex = p2.x - p1.x; const ey = p2.y - p1.y;
+    const denom = dir.x * ey - dir.y * ex;
+    if (Math.abs(denom) < 1e-9) return null;
+    const dx = p1.x - origin.x; const dy = p1.y - origin.y;
+    const t = (dx * ey - dy * ex) / denom;
+    const u = (dx * dir.y - dy * dir.x) / denom;
+    if (t < -1e-9 || u < -1e-9 || u > 1 + 1e-9) return null;
+    const tt = Math.max(0, t);
+    return { x: origin.x + dir.x * tt, y: origin.y + dir.y * tt };
+  }
+  const center = arcCenter(p1, p2, sagitta);
+  const R = radiusFromSagitta(p1, p2, sagitta);
+  if (!center || !Number.isFinite(R) || R < 1e-9) return null;
+  const ox = origin.x - center.x; const oy = origin.y - center.y;
+  const bq = ox * dir.x + oy * dir.y;
+  const cq = ox * ox + oy * oy - R * R;
+  const disc = bq * bq - cq;
+  if (disc < 0) return null;
+  const sq = Math.sqrt(Math.max(0, disc));
+  const norm = (t: number) => {
+    while (t < 0) t += Math.PI * 2;
+    while (t >= Math.PI * 2) t -= Math.PI * 2;
+    return t;
+  };
+  const ccw = sagitta < 0;
+  const a1 = norm(Math.atan2(p1.y - center.y, p1.x - center.x));
+  const a2 = norm(Math.atan2(p2.y - center.y, p2.x - center.x));
+  const span = ccw ? norm(a2 - a1) : norm(a1 - a2);
+  const cand = [-bq - sq, -bq + sq].filter((t) => t >= -1e-9).sort((x, y) => x - y);
+  for (const t of cand) {
+    const tt = Math.max(0, t);
+    const px = origin.x + dir.x * tt;
+    const py = origin.y + dir.y * tt;
+    const ap = norm(Math.atan2(py - center.y, px - center.x));
+    const rel = ccw ? norm(ap - a1) : norm(a1 - ap);
+    if (rel <= span + 1e-9) return { x: px, y: py };
+  }
+  return null;
+}
+
+/** Cari dinding lengkung yang ditempeli titik (di busur, bukan di ujungnya). */
+export function attachedArcForPoint(
+  walls: { p1: Point; p2: Point; arc_sagitta_m?: number }[],
+  pt: Point,
+  tol = ARC_ATTACH_TOL,
+): { p1: Point; p2: Point; arc_sagitta_m?: number } | null {
+  for (const w of walls) {
+    const s = w.arc_sagitta_m || 0;
+    if (!s || Math.abs(s) < 1e-9) continue;
+    if (normalizePointsEqual(pt, w.p1) || normalizePointsEqual(pt, w.p2)) continue;
+    if (distancePointToArc(pt, w.p1, w.p2, s) <= tol) return w;
+  }
+  return null;
+}

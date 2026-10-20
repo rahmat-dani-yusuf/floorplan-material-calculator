@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
-import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength } from '../utils/geometry';
+import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
 import { defaultFloor } from '../types';
 import { clampOffset } from '../utils/openings';
@@ -41,6 +41,79 @@ function clampOpeningOffset(w: Wall, o: Opening, offset: number): number {
   const len = effectiveWallLength(w);
   const half = o.width_meters / 2;
   return Math.max(MARGIN + half, Math.min(len - MARGIN - half, offset));
+}
+
+/** Titik ujung dinding lain yang menempel di kurva dinding acuan (toleransi ~0,02 m). */
+function findCurveAttachments(walls: Wall[], arcWall: Wall, tol = ARC_ATTACH_TOL): { point: Point; wall: Wall; end: 'p1' | 'p2' }[] {
+  const s = arcWall.arc_sagitta_m || 0;
+  const curved = Math.abs(s) >= 1e-9;
+  const out: { point: Point; wall: Wall; end: 'p1' | 'p2' }[] = [];
+  for (const w of walls) {
+    if (w.id === arcWall.id) continue;
+    for (const end of ['p1', 'p2'] as const) {
+      const pt = w[end];
+      // Ujung-ujung busur itu sendiri bukan tempelan.
+      if (normalizePointsEqual(pt, arcWall.p1) || normalizePointsEqual(pt, arcWall.p2)) continue;
+      const d = curved
+        ? distancePointToArc(pt, arcWall.p1, arcWall.p2, s)
+        : distancePointToSegment(pt, arcWall.p1, arcWall.p2);
+      if (d > tol) continue;
+      // Harus berada dalam rentang kurva (bukan perpanjangan garis).
+      const c = Math.hypot(arcWall.p2.x - arcWall.p1.x, arcWall.p2.y - arcWall.p1.y);
+      if (c > 1e-9) {
+        const dx = arcWall.p2.x - arcWall.p1.x; const dy = arcWall.p2.y - arcWall.p1.y;
+        const t = ((pt.x - arcWall.p1.x) * dx + (pt.y - arcWall.p1.y) * dy) / (c * c);
+        if (t < -1e-6 || t > 1 + 1e-6) continue;
+      }
+      if (out.some((o) => o.wall.id === w.id && o.end === end)) continue;
+      out.push({ point: { ...pt }, wall: w, end });
+    }
+  }
+  return out;
+}
+
+/** Geser titik-titik tempelan ke kurva baru (perpotongan sinar, fallback proyeksi).
+ * Semua dinding yang berbagi titik lama ikut bergeser (seperti moveVertex),
+ * panjang diperbarui, dan proporsi bukaan dipertahankan. */
+function reattachNeighbors(nextWalls: Wall[], arcWall: Wall, atts: { point: Point; wall: Wall; end: 'p1' | 'p2' }[]): Wall[] {
+  if (atts.length === 0) return nextWalls;
+  const s = arcWall.arc_sagitta_m || 0;
+  const oldToNew: { oldPt: Point; newPt: Point }[] = [];
+  for (const a of atts) {
+    if (oldToNew.some((m) => normalizePointsEqual(m.oldPt, a.point))) continue;
+    const cur = nextWalls.find((x) => x.id === a.wall.id);
+    if (!cur) continue;
+    // Ujung lawan yang tidak berubah menentukan arah garis dinding tetangga.
+    const anchor = a.end === 'p1' ? cur.p2 : cur.p1;
+    const dx = a.point.x - anchor.x; const dy = a.point.y - anchor.y;
+    const dl = Math.hypot(dx, dy);
+    let target: Point | null = null;
+    if (dl > 1e-9) {
+      target = intersectRayWithCurve(anchor, { x: dx / dl, y: dy / dl }, arcWall.p1, arcWall.p2, s)
+        ?? intersectRayWithCurve(anchor, { x: -dx / dl, y: -dy / dl }, arcWall.p1, arcWall.p2, s);
+    }
+    if (!target) target = projectPointToCurve(a.point, arcWall.p1, arcWall.p2, s);
+    oldToNew.push({
+      oldPt: { ...a.point },
+      newPt: { x: Math.round(target.x * 100) / 100, y: Math.round(target.y * 100) / 100 },
+    });
+  }
+  if (oldToNew.length === 0) return nextWalls;
+  return nextWalls.map((w) => {
+    if (w.id === arcWall.id) return w;
+    let nw = w;
+    let changed = false;
+    for (const end of ['p1', 'p2'] as const) {
+      const m = oldToNew.find((x) => normalizePointsEqual(nw[end], x.oldPt));
+      if (m && !normalizePointsEqual(nw[end], m.newPt)) {
+        nw = end === 'p1' ? { ...nw, p1: { ...m.newPt } } : { ...nw, p2: { ...m.newPt } };
+        changed = true;
+      }
+    }
+    if (!changed) return w;
+    const withLen = { ...nw, length_meters: effectiveWallLength(nw) };
+    return rescaleOpenings(w.length_meters, withLen);
+  });
 }
 
 interface Snapshot {
@@ -332,9 +405,18 @@ export const useWallStore = create<WallStore>()(
 
     moveVertex: (oldPoint, newPoint) => {
       const { walls, selectedId, past } = get();
+      // Titik yang menempel di busur tidak boleh lepas: jepit geraknya sepanjang busur.
+      const arc = attachedArcForPoint(walls, oldPoint);
+      const target = arc ? projectPointToCurve(newPoint, arc.p1, arc.p2, arc.arc_sagitta_m || 0) : newPoint;
       const updated = walls.map((w) => {
-        if (normalizePointsEqual(w.p1, oldPoint)) return { ...w, p1: newPoint, length_meters: wallLength(newPoint, w.p2) };
-        if (normalizePointsEqual(w.p2, oldPoint)) return { ...w, p2: newPoint, length_meters: wallLength(w.p1, newPoint) };
+        if (normalizePointsEqual(w.p1, oldPoint)) {
+          const nw = { ...w, p1: target, length_meters: 0 };
+          return { ...nw, length_meters: effectiveWallLength(nw) };
+        }
+        if (normalizePointsEqual(w.p2, oldPoint)) {
+          const nw = { ...w, p2: target, length_meters: 0 };
+          return { ...nw, length_meters: effectiveWallLength(nw) };
+        }
         return w;
       });
       set({ walls: updated, past: [...past, { walls, selectedId }].slice(-50), future: [] });
@@ -519,6 +601,8 @@ export const useWallStore = create<WallStore>()(
       if (idx === -1) return;
       const w = walls[idx];
       lastSagEditId = null;
+      // Titik tempelan dicari di kurva LAMA sebelum perubahan.
+      const atts = findCurveAttachments(walls, w);
       const nextWalls = [...walls];
       if (!curved) {
         nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) });
@@ -527,7 +611,8 @@ export const useWallStore = create<WallStore>()(
         const sag = Math.round((c * 0.15 + 0.1) * 100) / 100;
         nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: sag, length_meters: arcLength(w.p1, w.p2, sag) });
       }
-      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+      const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
+      set({ walls: out, past: [...past, { walls, selectedId }].slice(-50), future: [] });
     },
 
     setArcRadius: (id, radius) => {
@@ -543,9 +628,11 @@ export const useWallStore = create<WallStore>()(
       const sag = sagittaFromRadius(w.p1, w.p2, radius);
       if (sag == null) return false;
       lastSagEditId = null;
+      const atts = findCurveAttachments(walls, w);
       const nextWalls = [...walls];
       nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: Math.round(sign * sag * 100) / 100, length_meters: arcLength(w.p1, w.p2, sag) });
-      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+      const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
+      set({ walls: out, past: [...past, { walls, selectedId }].slice(-50), future: [] });
       return true;
     },
 
@@ -561,15 +648,22 @@ export const useWallStore = create<WallStore>()(
       lastSagEditId = id;
       lastSagEditAt = now;
       const nextPast = merge ? past : [...past, { walls, selectedId }].slice(-50);
+      // Seret handle/slider tetap live + satu undo (merge).
+      // Tempelan dicari di kurva TERKINI (state terakhir), bukan snapshot lama,
+      // agar titik yang sudah menempel di frame sebelumnya ikut terbawa.
+      const curWall = get().walls[idx];
+      const atts = findCurveAttachments(get().walls, merge && curWall ? curWall : w);
       if (Math.abs(s) < 0.01) {
         const nextWalls = [...walls];
         nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) });
-        set({ walls: nextWalls, past: nextPast, future: [] });
+        const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
+        set({ walls: out, past: nextPast, future: [] });
         return;
       }
       const nextWalls = [...walls];
       nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: s, length_meters: arcLength(w.p1, w.p2, s) });
-      set({ walls: nextWalls, past: nextPast, future: [] });
+      const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
+      set({ walls: out, past: nextPast, future: [] });
     },
 
     flipArc: (id) => {
@@ -579,9 +673,11 @@ export const useWallStore = create<WallStore>()(
       const w = walls[idx];
       const s = -(w.arc_sagitta_m || 0);
       lastSagEditId = null;
+      const atts = findCurveAttachments(walls, w);
       const nextWalls = [...walls];
       nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: Math.abs(s) < 1e-9 ? wallLength(w.p1, w.p2) : arcLength(w.p1, w.p2, s) };
-      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+      const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
+      set({ walls: out, past: [...past, { walls, selectedId }].slice(-50), future: [] });
     },
   };
 }, {
