@@ -4,7 +4,7 @@ import Svg, { Circle, G, Line, Path, Text as SVGText, Rect } from 'react-native-
 import { useWallStore, selectActiveWall, selectFloorBelow } from '../store/wallStore';
 import { C } from '../theme';
 import { openingGeometry } from '../utils/openings';
-import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath } from '../utils/geometry';
+import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath, arcSegmentPath, doorLeafPath } from '../utils/geometry';
 import type { Point } from '../types';
 
 const GRID_STEP = 1;
@@ -107,6 +107,17 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
     };
     for (const w of walls) {
       addPoint(w.p1); addPoint(w.p2);
+      const sag = w.arc_sagitta_m || 0;
+      const curved = Math.abs(sag) >= 1e-9;
+      if (curved) {
+        // Puncak busur ikut menentukan bbox agar busur tidak terpotong.
+        addPoint(arcApex(w.p1, w.p2, sag));
+        for (const o of w.openings ?? []) {
+          const geo = openingGeometry(w, o);
+          addPoint(geo.startWorld); addPoint(geo.endWorld); addPoint(geo.center);
+        }
+        continue;
+      }
       for (const o of w.openings ?? []) {
         const half = o.width_meters / 2;
         addPoint({ x: w.p1.x + ((w.p2.x - w.p1.x) / (wallLength(w.p1, w.p2) || 1)) * (o.offset_meters - half), y: w.p1.y + ((w.p2.y - w.p1.y) / (wallLength(w.p1, w.p2) || 1)) * (o.offset_meters - half) });
@@ -241,6 +252,15 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         }
         if (best) {
           selectWall(best.w.id);
+          // Sentuh tepat pada bukaan (diukur sepanjang busur) = tetap pilih
+          // dindingnya, tanpa mulai drag vertex/handle.
+          for (const o of best.w.openings ?? []) {
+            const geo = openingGeometry(best.w, o);
+            if (distance(wpt, geo.center) < Math.max(0.3, o.width_meters / 2)) {
+              modeRef.current = 'none'; setMode('none');
+              return;
+            }
+          }
           // Handle busur: seret puncak untuk mengubah kelengkungan (dinding lengkung terpilih).
           if (best.w.arc_sagitta_m) {
             const apex = arcApex(best.w.p1, best.w.p2, best.w.arc_sagitta_m);
@@ -497,17 +517,38 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
                   const sW = ptScreen(geo.startWorld);
                   const eW = ptScreen(geo.endWorld);
                   const isSelOpen = isSel && w.id === selectedId && o.id === (w.openings?.find(x => x.id === o.id)?.id); // not needed; just show all
+                  // Bukaan pada dinding lengkung digambar sebagai potongan busur
+                  // yang menyatu dengan dinding (offset = jarak busur dari p1).
+                  const openPath = geo.curved
+                    ? arcSegmentPath(w.p1, w.p2, sag, geo.arcStart, geo.arcEnd, ptScreen)
+                    : `M ${sW.x} ${sW.y} L ${eW.x} ${eW.y}`;
+                  const cW = ptScreen(geo.center);
+                  const leafPath = o.type === 'pintu'
+                    ? (geo.curved
+                      ? doorLeafPath(w.p1, w.p2, sag, geo.arcEnd, o.width_meters, o.swing, ptScreen)
+                      : `M ${eW.x} ${eW.y} L ${eW.x - (eW.x - sW.x) * 0.2} ${eW.y - (eW.y - sW.y) * 0.2}`)
+                    : null;
                   return (
                     <G key={o.id}>
                       {/* gap in wall line represented by not drawing over opening; already done by drawing opening over */}
-                      <Line x1={sW.x} y1={sW.y} x2={eW.x} y2={eW.y} stroke={o.type === 'pintu' ? '#ffb95f' : '#89ceff'} strokeWidth={o.type === 'pintu' ? 4 : 3} />
+                      <Path d={openPath} fill="none" stroke={o.type === 'pintu' ? '#ffb95f' : '#89ceff'} strokeWidth={o.type === 'pintu' ? 4 : 3} strokeLinecap="round" />
                       {o.type === 'pintu' && (
                         <>
-                          <Line x1={sW.x} y1={sW.y} x2={sW.x + (eW.x - sW.x) * 0.3} y2={sW.y + (eW.y - sW.y) * 0.3} stroke="#ffb95f" strokeWidth={2} />
-                          <Line x1={eW.x} y1={eW.y} x2={eW.x - (eW.x - sW.x) * 0.2} y2={eW.y - (eW.y - sW.y) * 0.2} stroke="#ffb95f" strokeWidth={2} strokeDasharray="4 2" />
+                          <Path d={doorLeafPath(w.p1, w.p2, sag, geo.arcStart, o.width_meters, o.swing, ptScreen)} fill="none" stroke="#ffb95f" strokeWidth={2} />
+                          {leafPath && <Path d={leafPath} fill="none" stroke="#ffb95f" strokeWidth={2} strokeDasharray="4 2" />}
                         </>
                       )}
-                      {o.type === 'jendela' && (
+                      {o.type === 'jendela' && geo.curved && (
+                        <>
+                          {/* garis ganda sejajar busur untuk jendela lengkung */}
+                          <Path d={arcSegmentPath(w.p1, w.p2, sag, geo.arcStart, geo.arcEnd, (p) => {
+                            const sc = ptScreen(p);
+                            return { x: sc.x, y: sc.y - 2 };
+                          })} fill="none" stroke="#89ceff" strokeWidth={1} />
+                          <Circle cx={cW.x} cy={cW.y} r={2.5} fill="none" stroke="#89ceff" strokeWidth={1} />
+                        </>
+                      )}
+                      {o.type === 'jendela' && !geo.curved && (
                         <>
                           <Line x1={sW.x} y1={sW.y} x2={eW.x} y2={eW.y} stroke="#89ceff" strokeWidth={1} />
                           <Line x1={sW.x + (eW.x - sW.x) * 0.5} y1={sW.y + (eW.y - sW.y) * 0.5 - 3} x2={sW.x + (eW.x - sW.x) * 0.5} y2={sW.y + (eW.y - sW.y) * 0.5 + 3} stroke="#89ceff" strokeWidth={1} />
@@ -525,10 +566,17 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
             if (!w) return null;
             const s1 = ptScreen(w.p1);
             const s2 = ptScreen(w.p2);
-            const len = Math.hypot(s2.x - s1.x, s2.y - s1.y) || 1;
+            const sagSel = w.arc_sagitta_m || 0;
+            const curvedSel = Math.abs(sagSel) >= 1e-9;
             return (w.openings ?? []).map((o) => {
-              const cx = s1.x + (o.width_meters / w.length_meters) * (s2.x - s1.x) * 0.5; // rough
-              return <Rect key={o.id} x={cx - 4} y={Math.min(s1.y, s2.y) - 8} width={8} height={8} fill={o.type === 'pintu' ? '#ffb95f' : '#89ceff'} rx={2} />;
+              const geoSel = openingGeometry(w, o);
+              const cS = ptScreen(geoSel.center);
+              if (!curvedSel) {
+                const len = Math.hypot(s2.x - s1.x, s2.y - s1.y) || 1;
+                const cx = s1.x + (o.width_meters / w.length_meters) * (s2.x - s1.x) * 0.5; // rough
+                return <Rect key={o.id} x={cx - 4} y={Math.min(s1.y, s2.y) - 8} width={8} height={8} fill={o.type === 'pintu' ? '#ffb95f' : '#89ceff'} rx={2} />;
+              }
+              return <Rect key={o.id} x={cS.x - 4} y={cS.y - 8} width={8} height={8} fill={o.type === 'pintu' ? '#ffb95f' : '#89ceff'} rx={2} />;
             });
           })()}
           {/* snap indicator */}

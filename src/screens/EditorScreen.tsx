@@ -10,7 +10,8 @@ import { useAuthStore } from '../store/authStore';
 import { keluar } from '../services/authService';
 import { BRICK_LABEL, DEFAULT_PINTU, DEFAULT_JENDELA, OPENING_LIMITS } from '../constants/materials';
 import type { BrickType, MortarRatio, Point } from '../types';
-import { minRadius, radiusFromSagitta } from '../utils/geometry';
+import { minRadius, radiusFromSagitta, effectiveWallLength } from '../utils/geometry';
+import { MARGIN } from '../utils/openings';
 import { C } from '../theme';
 import NamaProyekModal from '../components/NamaProyekModal';
 import TemplateModal from '../components/TemplateModal';
@@ -20,6 +21,59 @@ const MORTARS: { value: MortarRatio; label: string }[] = [
   { value: '1:4', label: '1:4 Standar' },
   { value: '1:2', label: '1:2 Kedap Air' },
 ];
+
+/** Slider kelengkungan dua arah: tengah = lurus, ujung = setengah lingkaran.
+ * Area sentuh 44px; hanya merebut gesture horizontal agar scroll panel tetap lancar. */
+function ArcSlider({ sagitta, maxSag, onSlide }: { sagitta: number; maxSag: number; onSlide: (v: number) => void }) {
+  const trackWRef = useRef(0);
+  const maxSagRef = useRef(maxSag);
+  maxSagRef.current = maxSag;
+  const onSlideRef = useRef(onSlide);
+  onSlideRef.current = onSlide;
+
+  const setFromX = (x: number) => {
+    const w = trackWRef.current;
+    if (!(w > 0)) return;
+    const cx = Math.max(0, Math.min(w, x));
+    const t = cx / w;
+    onSlideRef.current(Math.round(((t * 2 - 1) * maxSagRef.current) * 100) / 100);
+  };
+
+  const pan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dx) > 8 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.2,
+    onPanResponderGrant: (e) => setFromX(e.nativeEvent.locationX),
+    onPanResponderMove: (e) => setFromX(e.nativeEvent.locationX),
+    onPanResponderTerminationRequest: () => false,
+  }), []);
+
+  const t = maxSag > 1e-9 ? Math.max(0, Math.min(1, (sagitta / maxSag + 1) / 2)) : 0.5;
+  const fillLeft = Math.min(t, 0.5) * 100;
+  const fillWidth = Math.abs(t - 0.5) * 100;
+  return (
+    <View
+      {...pan.panHandlers}
+      style={{ minHeight: 44, justifyContent: 'center' }}
+      accessibilityRole="adjustable"
+      accessibilityLabel="Kelengkungan dinding"
+      accessibilityValue={{ text: Math.abs(sagitta) < 0.05 ? 'Lurus' : `${sagitta.toFixed(2)} m` }}
+    >
+      <View
+        onLayout={(e) => { trackWRef.current = e.nativeEvent.layout.width; }}
+        style={{ height: 6, borderRadius: 3, backgroundColor: C.surfaceHighest }}
+      >
+        <View style={{ position: 'absolute', left: `${fillLeft}%`, width: `${fillWidth}%`, top: 0, bottom: 0, backgroundColor: C.primary, borderRadius: 3 }} />
+        <View style={{ position: 'absolute', left: '50%', top: -3, width: 2, height: 12, marginLeft: -1, backgroundColor: C.outline, borderRadius: 1 }} />
+      </View>
+      <View style={{ position: 'absolute', left: `${t * 100}%`, top: 22, width: 28, height: 28, marginLeft: -14, marginTop: -14, borderRadius: 14, backgroundColor: C.primary, borderWidth: 2, borderColor: '#fff' }} />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+        <Text style={{ color: C.outline, fontSize: 10 }}>◀ kiri</Text>
+        <Text style={{ color: C.outline, fontSize: 10 }}>lurus</Text>
+        <Text style={{ color: C.outline, fontSize: 10 }}>kanan ▶</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects }: { onCalculate: () => void; onOpenPrices?: () => void; onOpenProjects?: () => void }) {
   const s = useWallStore();
@@ -340,6 +394,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           const sag = wall.arc_sagitta_m || 0;
           const curved = Math.abs(sag) >= 1e-9;
           const chord = Math.hypot(wall.p2.x - wall.p1.x, wall.p2.y - wall.p1.y);
+          const maxSag = chord / 2;
           const minR = minRadius(wall.p1, wall.p2);
           const curR = curved ? radiusFromSagitta(wall.p1, wall.p2, sag) : 0;
           const shownR = arcRadiusText !== '' ? arcRadiusText : (curved && Number.isFinite(curR) ? String(Math.round(curR * 100) / 100) : '');
@@ -405,6 +460,24 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                       <Text style={{ color: C.text, fontSize: 11 }}>Balik arah</Text>
                     </Pressable>
                   </View>
+                  {/* Slider kelengkungan dua arah, di bawah input radius */}
+                  {maxSag >= 0.005 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={{ color: C.textDim, fontSize: 11 }}>Kelengkungan</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                        <View style={{ flex: 1 }}>
+                          <ArcSlider
+                            sagitta={sag}
+                            maxSag={maxSag}
+                            onSlide={(v) => { setArcRadiusText(''); s.setArcSagitta(wall.id, v); }}
+                          />
+                        </View>
+                        <Text style={{ color: C.text, fontSize: 11, width: 118, textAlign: 'right' }}>
+                          {Math.abs(sag) < 0.05 || !Number.isFinite(curR) ? 'Lurus' : `R = ${curR.toFixed(2)} m · busur ${wall.length_meters.toFixed(2)} m`}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
                   <Text style={{ color: C.secondary, fontSize: 11, marginTop: 4 }}>Panjang busur {wall.length_meters.toFixed(2)} m</Text>
                 </>
               )}
@@ -482,9 +555,9 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: C.textDim, fontSize: 10 }}>Posisi (m)</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.max(0.1, (o.offset_meters || 0) - 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.max(MARGIN + o.width_meters / 2, (o.offset_meters || 0) - 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
                     <Text style={{ color: C.text, fontWeight: '700' }}>{(o.offset_meters || 0).toFixed(2)}</Text>
-                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.min(wall.length_meters - 0.1, (o.offset_meters || 0) + 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
+                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.min(effectiveWallLength(wall) - MARGIN - o.width_meters / 2, (o.offset_meters || 0) + 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
                   </View>
                 </View>
                 {o.type === 'pintu' && (

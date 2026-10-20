@@ -157,6 +157,50 @@ export function arcApex(p1: Point, p2: Point, sagitta: number): Point {
   return { x: mx + nx * sagitta, y: my + ny * sagitta };
 }
 
+/** Path busur untuk potongan bukaan [s0,s1] (jarak busur dari p1).
+ * Rp dihitung dari radius lingkaran (R dunia → px) agar sejajar dinding. */
+export function arcSegmentPath(a: Point, b: Point, sagitta: number, s0: number, s1: number, toScreen: (p: Point) => Point): string {
+  const A = toScreen(pointAtArcDistance(a, b, sagitta, s0));
+  const B = toScreen(pointAtArcDistance(a, b, sagitta, s1));
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return `M ${A.x} ${A.y} L ${B.x} ${B.y}`;
+  const c = chordLength(a, b);
+  const R = radiusFromSagitta(a, b, sagitta);
+  if (!Number.isFinite(R) || R <= 0 || c < 1e-9) return `M ${A.x} ${A.y} L ${B.x} ${B.y}`;
+  // Skala dunia→layar dari tali (asumsi seragam).
+  const aS = toScreen(a); const bS = toScreen(b);
+  const worldChord = c;
+  const pxChord = Math.hypot(bS.x - aS.x, bS.y - aS.y) || 1;
+  const k = pxChord / worldChord;
+  const Rp = R * k;
+  const span = arcSpanForWidth(a, b, sagitta, Math.abs(s1 - s0));
+  const largeArc = span > Math.PI ? 1 : 0;
+  const sweep = sagitta > 0 ? 1 : 0;
+  return `M ${A.x} ${A.y} A ${Rp} ${Rp} 0 ${largeArc} ${sweep} ${B.x} ${B.y}`;
+}
+
+/** Daun pintu melengkung: garis dari ujung bukaan mengikuti singgung + ayunan swing. */
+export function doorLeafPath(a: Point, b: Point, sagitta: number, hingeS: number, width: number, swing: 1 | -1, toScreen: (p: Point) => Point): string {
+  const curved = sagitta && Math.abs(sagitta) >= 1e-9;
+  if (!curved) {
+    const p1 = a; const p2 = b;
+    const c = chordLength(p1, p2) || 1;
+    const dx = (p2.x - p1.x) / c; const dy = (p2.y - p1.y) / c;
+    const hx = p1.x + dx * hingeS; const hy = p1.y + dy * hingeS;
+    const px = -dy * swing; const py = dx * swing;
+    const ex = hx + dx * width * 0.9 + px * width * 0.55;
+    const ey = hy + dy * width * 0.9 + py * width * 0.55;
+    const H = toScreen({ x: hx, y: hy }); const E = toScreen({ x: ex, y: ey });
+    return `M ${H.x} ${H.y} L ${E.x} ${E.y}`;
+  }
+  const hinge = pointAtArcDistance(a, b, sagitta, hingeS);
+  const tan = tangentAtArcDistance(a, b, sagitta, hingeS);
+  const px = -tan.y * swing; const py = tan.x * swing;
+  const ex = hinge.x + tan.x * width * 0.9 + px * width * 0.55;
+  const ey = hinge.y + tan.y * width * 0.9 + py * width * 0.55;
+  const H = toScreen(hinge); const E = toScreen({ x: ex, y: ey });
+  return `M ${H.x} ${H.y} L ${E.x} ${E.y}`;
+}
+
 /** Path SVG busur lewat titik-titik layar (flag sweep mengikuti tanda sagitta). */
 export function arcPath(p1: Point, p2: Point, sagitta: number, toScreen: (p: Point) => Point): string {
   const a = toScreen(p1);
@@ -217,6 +261,38 @@ export function pointAtArcDistance(a: Point, b: Point, sagitta: number, s: numbe
   const t = Math.max(0, Math.min(1, s / Math.max(1e-9, total)));
   const ang = startAng + delta * t;
   return { x: center.x + R * Math.cos(ang), y: center.y + R * Math.sin(ang) };
+}
+
+/** Arah singgung busur (vektor satuan) pada jarak s meter dari p1. */
+export function tangentAtArcDistance(a: Point, b: Point, sagitta: number, s: number): Point {
+  const c = chordLength(a, b);
+  if (!sagitta || Math.abs(sagitta) < 1e-9 || c < 1e-9) {
+    const t = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: (b.x - a.x) / t, y: (b.y - a.y) / t };
+  }
+  const R = radiusFromSagitta(a, b, sagitta);
+  const center = arcCenter(a, b, sagitta);
+  if (!center || !Number.isFinite(R) || R < 1e-9) {
+    const t = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { x: (b.x - a.x) / t, y: (b.y - a.y) / t };
+  }
+  const startAng = Math.atan2(a.y - center.y, a.x - center.x);
+  let delta = Math.atan2(b.y - center.y, b.x - center.x) - startAng;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  const total = Math.abs(R * delta);
+  const t = Math.max(0, Math.min(1, s / Math.max(1e-9, total)));
+  const ang = startAng + delta * t;
+  const dir = delta >= 0 ? 1 : -1;
+  return { x: -Math.sin(ang) * dir, y: Math.cos(ang) * dir };
+}
+
+/** Sudut busur (radian) yang ditempati lebar bukaan w pada jarak s dari p1. */
+export function arcSpanForWidth(a: Point, b: Point, sagitta: number, width: number): number {
+  if (!sagitta || Math.abs(sagitta) < 1e-9) return 0;
+  const R = radiusFromSagitta(a, b, sagitta);
+  if (!Number.isFinite(R) || R < 1e-9) return 0;
+  return Math.max(0, Math.min(Math.PI, width / R));
 }
 
 /** Panjang efektif dinding: busur bila melengkung, tali bila lurus. */

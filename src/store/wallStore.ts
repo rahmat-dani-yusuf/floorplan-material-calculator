@@ -8,6 +8,7 @@ import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
 import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
 import { defaultFloor } from '../types';
+import { clampOffset } from '../utils/openings';
 
 export const DEFAULT_WALL: Wall = {
   id: 'w-1',
@@ -23,6 +24,24 @@ export const DEFAULT_WALL: Wall = {
 
 const clamp = (n: number) =>
   Math.min(LIMITS.max, Math.max(LIMITS.min, Math.round(n * 100) / 100));
+
+// offset bukaan = jarak sepanjang BUSUR dari p1. Saat panjang berubah
+// (lurus↔lengkung / kelengkungan berubah), pertahankan posisi relatif
+// (proporsi offset/panjang) lalu clamp ke batas busur.
+function rescaleOpenings(oldLen: number, next: Wall): Wall {
+  if (!next.openings || next.openings.length === 0) return next;
+  const newLen = effectiveWallLength(next);
+  const t = (oldLen > 1e-9 && newLen > 1e-9) ? newLen / oldLen : 1;
+  const openings = next.openings.map((o) => ({ ...o, offset_meters: clampOffset(next, o, o.offset_meters * t) }));
+  return { ...next, openings };
+}
+
+/** Clamp offset bukaan ke batas dinding (panjang busur bila lengkung). */
+function clampOpeningOffset(w: Wall, o: Opening, offset: number): number {
+  const len = effectiveWallLength(w);
+  const half = o.width_meters / 2;
+  return Math.max(MARGIN + half, Math.min(len - MARGIN - half, offset));
+}
 
 interface Snapshot {
   walls: Wall[];
@@ -95,7 +114,7 @@ export const useWallStore = create<WallStore>()(
       const newDir = { x: (dir.x / len) * patch.length_meters, y: (dir.y / len) * patch.length_meters };
       updated.p2 = { x: w.p1.x + newDir.x, y: w.p1.y + newDir.y };
     }
-    nextWalls[idx] = updated;
+    nextWalls[idx] = rescaleOpenings(nextWalls[idx].length_meters, updated);
     if (JSON.stringify(nextWalls) === JSON.stringify(walls)) return;
     set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
     syncActiveFloor();
@@ -133,6 +152,9 @@ export const useWallStore = create<WallStore>()(
 
   // ----- Dinding melengkung: aksi tunggal (toggleArc / setArcRadius /
   // setArcSagitta / flipArc) ada di bawah. length_meters selalu = panjang busur.
+  // Gabung undo geser busur: satu gesture slider/drag = satu langkah undo.
+  let lastSagEditId: string | null = null;
+  let lastSagEditAt = 0;
 
   return {
     
@@ -192,16 +214,18 @@ export const useWallStore = create<WallStore>()(
       if (!w) return;
       const newP2 = moveEndAlongDirection(w.p1, w.p2, m);
       const len = wallLength(w.p1, newP2);
-      const nextWalls = walls.map((mw) =>
-        mw.id === selectedId ? { ...mw, p2: newP2, length_meters: len, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(len - MARGIN, o.offset_meters)) })) } : mw,
-      );
+      const nextWalls = walls.map((mw) => {
+        if (mw.id !== selectedId) return mw;
+        const nw = { ...mw, p2: newP2, length_meters: len };
+        return { ...nw, openings: (nw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nw, o, o.offset_meters) })) };
+      });
       // sync connected walls that share w.p2
       const updated = nextWalls.map((nw) => {
         if (nw.id !== selectedId && normalizePointsEqual(nw.p1, w.p2)) {
-          return { ...nw, p1: newP2, length_meters: wallLength(newP2, nw.p2), openings: (nw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(nw.length_meters - MARGIN, o.offset_meters)) })) };
+          return { ...nw, p1: newP2, length_meters: wallLength(newP2, nw.p2), openings: (nw.openings ?? []).map((o) => { const nnw = { ...nw, p1: newP2, length_meters: wallLength(newP2, nw.p2) }; return { ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) }; }) };
         }
         if (nw.id !== selectedId && normalizePointsEqual(nw.p2, w.p2)) {
-          return { ...nw, p2: newP2, length_meters: wallLength(nw.p1, newP2), openings: (nw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(nw.length_meters - MARGIN, o.offset_meters)) })) };
+          return { ...nw, p2: newP2, length_meters: wallLength(nw.p1, newP2), openings: (nw.openings ?? []).map((o) => { const nnw = { ...nw, p2: newP2, length_meters: wallLength(nw.p1, newP2) }; return { ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) }; }) };
         }
         return nw;
       });
@@ -214,9 +238,9 @@ export const useWallStore = create<WallStore>()(
       const w = walls[idx];
       const newP2 = moveEndAlongDirection(w.p1, w.p2, m);
       const nextWalls = walls.map((mw, i) => {
-        if (i === idx) return { ...mw, p2: newP2, length_meters: wallLength(w.p1, newP2), openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(wallLength(w.p1, newP2) - MARGIN, o.offset_meters)) })) };
-        if (normalizePointsEqual(mw.p1, w.p2)) return { ...mw, p1: newP2, length_meters: wallLength(newP2, mw.p2), openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(wallLength(newP2, mw.p2) - MARGIN, o.offset_meters)) })) };
-        if (normalizePointsEqual(mw.p2, w.p2)) return { ...mw, p2: newP2, length_meters: wallLength(mw.p1, newP2), openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: Math.max(MARGIN, Math.min(wallLength(mw.p1, newP2) - MARGIN, o.offset_meters)) })) };
+        if (i === idx) { const nnw = { ...mw, p2: newP2, length_meters: wallLength(w.p1, newP2) }; return { ...nnw, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) })) }; }
+        if (normalizePointsEqual(mw.p1, w.p2)) { const nnw = { ...mw, p1: newP2, length_meters: wallLength(newP2, mw.p2) }; return { ...nnw, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) })) }; }
+        if (normalizePointsEqual(mw.p2, w.p2)) { const nnw = { ...mw, p2: newP2, length_meters: wallLength(mw.p1, newP2) }; return { ...nnw, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) })) }; }
         return mw;
       });
       set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
@@ -368,7 +392,10 @@ export const useWallStore = create<WallStore>()(
       const w = walls[idx];
       const nextOpenings = (w.openings ?? []).map((o) => {
         if (o.id !== openingId) return o;
-        const clamped = Math.max(MARGIN, Math.min(w.length_meters - MARGIN, Math.round(offset * 20) / 20));
+        // Batas offset memakai panjang BUSUR untuk dinding lengkung.
+        const len = effectiveWallLength(w);
+        const half = o.width_meters / 2;
+        const clamped = Math.max(MARGIN + half, Math.min(len - MARGIN - half, Math.round(offset * 20) / 20));
         return { ...o, offset_meters: clamped };
       });
       const nextWalls = [...walls];
@@ -491,13 +518,14 @@ export const useWallStore = create<WallStore>()(
       const idx = walls.findIndex((w) => w.id === id);
       if (idx === -1) return;
       const w = walls[idx];
+      lastSagEditId = null;
       const nextWalls = [...walls];
       if (!curved) {
-        nextWalls[idx] = { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) };
+        nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) });
       } else {
         const c = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y);
         const sag = Math.round((c * 0.15 + 0.1) * 100) / 100;
-        nextWalls[idx] = { ...w, arc_sagitta_m: sag, length_meters: arcLength(w.p1, w.p2, sag) };
+        nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: sag, length_meters: arcLength(w.p1, w.p2, sag) });
       }
       set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
     },
@@ -514,8 +542,9 @@ export const useWallStore = create<WallStore>()(
       const sign = prev < 0 ? -1 : 1;
       const sag = sagittaFromRadius(w.p1, w.p2, radius);
       if (sag == null) return false;
+      lastSagEditId = null;
       const nextWalls = [...walls];
-      nextWalls[idx] = { ...w, arc_sagitta_m: Math.round(sign * sag * 100) / 100, length_meters: arcLength(w.p1, w.p2, sag) };
+      nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: Math.round(sign * sag * 100) / 100, length_meters: arcLength(w.p1, w.p2, sag) });
       set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
       return true;
     },
@@ -526,15 +555,21 @@ export const useWallStore = create<WallStore>()(
       if (idx === -1) return;
       const w = walls[idx];
       const s = Math.round(sagitta * 100) / 100;
+      // Gerakan beruntun (<800ms, id sama) digabung jadi satu entri undo.
+      const now = Date.now();
+      const merge = lastSagEditId === id && now - lastSagEditAt < 800;
+      lastSagEditId = id;
+      lastSagEditAt = now;
+      const nextPast = merge ? past : [...past, { walls, selectedId }].slice(-50);
       if (Math.abs(s) < 0.01) {
         const nextWalls = [...walls];
-        nextWalls[idx] = { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) };
-        set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+        nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: 0, length_meters: wallLength(w.p1, w.p2) });
+        set({ walls: nextWalls, past: nextPast, future: [] });
         return;
       }
       const nextWalls = [...walls];
-      nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: arcLength(w.p1, w.p2, s) };
-      set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+      nextWalls[idx] = rescaleOpenings(w.length_meters, { ...w, arc_sagitta_m: s, length_meters: arcLength(w.p1, w.p2, s) });
+      set({ walls: nextWalls, past: nextPast, future: [] });
     },
 
     flipArc: (id) => {
@@ -543,6 +578,7 @@ export const useWallStore = create<WallStore>()(
       if (idx === -1) return;
       const w = walls[idx];
       const s = -(w.arc_sagitta_m || 0);
+      lastSagEditId = null;
       const nextWalls = [...walls];
       nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: Math.abs(s) < 1e-9 ? wallLength(w.p1, w.p2) : arcLength(w.p1, w.p2, s) };
       set({ walls: nextWalls, past: [...past, { walls, selectedId }].slice(-50), future: [] });
