@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
-import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL } from '../utils/geometry';
+import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL, cornerFillet, findSharpCorner, findCornerFillet } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
 import { defaultFloor } from '../types';
 import { clampOffset } from '../utils/openings';
@@ -34,6 +34,14 @@ function rescaleOpenings(oldLen: number, next: Wall): Wall {
   const t = (oldLen > 1e-9 && newLen > 1e-9) ? newLen / oldLen : 1;
   const openings = next.openings.map((o) => ({ ...o, offset_meters: clampOffset(next, o, o.offset_meters * t) }));
   return { ...next, openings };
+}
+
+/** Geser offset bukaan sejauh d (tanda + menjauhi p1). Untuk ujung p1 yang
+ * dipotong: posisi dunia ujung bukaan dipertahankan, bukan sekadar di-clamp. */
+function shiftOpenings(w: Wall, d: number): Wall {
+  if (!w.openings || w.openings.length === 0 || Math.abs(d) < 1e-9) return w;
+  const openings = w.openings.map((o) => ({ ...o, offset_meters: clampOffset(w, o, o.offset_meters - d) }));
+  return { ...w, openings };
 }
 
 /** Clamp offset bukaan ke batas dinding (panjang busur bila lengkung). */
@@ -165,6 +173,11 @@ interface WallStore {
   setArcRadius: (id: string, radius: number) => boolean;
   setArcSagitta: (id: string, sagitta: number) => void;
   flipArc: (id: string) => void;
+  roundCorner: (point: Point, radius: number) => { ok: true } | { ok: false; reason: string };
+  unroundCorner: () => { ok: true } | { ok: false; reason: string };
+  selectCorner: (p: Point | null) => void;
+  clearCornerSelection: () => void;
+  cornerPoint: Point | null;
 }
 
 export const useWallStore = create<WallStore>()(
@@ -239,6 +252,9 @@ export const useWallStore = create<WallStore>()(
     rooms: [],
     floors: [defaultFloor(DEFAULT_FLOOR_ID, 'Lantai 1', DEFAULT_FLOOR_WALLS.map((w) => ({ ...w })), [])],
     activeFloorId: DEFAULT_FLOOR_ID,
+    cornerPoint: null,
+    selectCorner: (p) => set({ cornerPoint: p ? { ...p } : null }),
+    clearCornerSelection: () => set({ cornerPoint: null }),
     toggleDedupe: () => set((s) => ({ dedupeOverlap: !s.dedupeOverlap, floors: s.floors.map((f) => (f.id === (s.activeFloorId ?? 'f-1') ? { ...f, dedupeOverlap: !s.dedupeOverlap } : f)) })),
     setRooms: (rooms) => set({ rooms }),
 
@@ -531,7 +547,7 @@ export const useWallStore = create<WallStore>()(
     reset: () => {
       const base = DEFAULT_FLOOR_WALLS.map((w) => ({ ...w, id: `${w.id}-${Date.now()}` }));
       const f = defaultFloor(DEFAULT_FLOOR_ID, 'Lantai 1', base, []);
-      set({ floors: [f], activeFloorId: DEFAULT_FLOOR_ID, walls: base.map((w) => ({ ...w })), rooms: [], dedupeOverlap: true, selectedId: base[0]?.id ?? 'w-1', past: [], future: [] });
+      set({ floors: [f], activeFloorId: DEFAULT_FLOOR_ID, walls: base.map((w) => ({ ...w })), rooms: [], dedupeOverlap: true, selectedId: base[0]?.id ?? 'w-1', past: [], future: [], cornerPoint: null });
     },
 
     setActiveFloor: (id) => {
@@ -539,7 +555,7 @@ export const useWallStore = create<WallStore>()(
       if (!st.floors.some((f) => f.id === id)) return;
       const { floor, walls, rooms, dedupe, id: fid } = selectFloorWalls(st.floors, id);
       if (!floor) return;
-      set({ activeFloorId: fid, walls: walls.map((w) => ({ ...w })), rooms: (rooms ?? []).map((r) => ({ ...r })), dedupeOverlap: dedupe, selectedId: walls[0]?.id ?? st.selectedId, past: [], future: [] });
+      set({ activeFloorId: fid, walls: walls.map((w) => ({ ...w })), rooms: (rooms ?? []).map((r) => ({ ...r })), dedupeOverlap: dedupe, selectedId: walls[0]?.id ?? st.selectedId, past: [], future: [], cornerPoint: null });
     },
 
     addFloor: (options) => {
@@ -678,6 +694,102 @@ export const useWallStore = create<WallStore>()(
       nextWalls[idx] = { ...w, arc_sagitta_m: s, length_meters: Math.abs(s) < 1e-9 ? wallLength(w.p1, w.p2) : arcLength(w.p1, w.p2, s) };
       const out = reattachNeighbors(nextWalls, nextWalls[idx], atts);
       set({ walls: out, past: [...past, { walls, selectedId }].slice(-50), future: [] });
+    },
+
+    roundCorner: (point, radius) => {
+      const { walls, selectedId, past } = get();
+      if (!(radius > 0)) return { ok: false as const, reason: 'Radius harus lebih dari 0.' };
+      const sharp = findSharpCorner(walls, point);
+      if (!sharp) return { ok: false as const, reason: 'Pilih titik sudut yang dipakai tepat dua dinding lurus.' };
+      const fullA = walls.find((x) => x.id === sharp.wallA.id);
+      const fullB = walls.find((x) => x.id === sharp.wallB.id);
+      if (!fullA || !fullB) return { ok: false as const, reason: 'Dinding sudut tidak ditemukan.' };
+      const corner = sharp.corner;
+      const otherA = normalizePointsEqual(fullA.p1, corner) ? fullA.p2 : fullA.p1;
+      const otherB = normalizePointsEqual(fullB.p1, corner) ? fullB.p2 : fullB.p1;
+      const fillet = cornerFillet(corner, { x: otherA.x - corner.x, y: otherA.y - corner.y }, { x: otherB.x - corner.x, y: otherB.y - corner.y }, radius);
+      if (!fillet) return { ok: false as const, reason: 'Sudut terlalu lurus atau berbalik untuk dibulatkan.' };
+      const lenA = Math.hypot(otherA.x - corner.x, otherA.y - corner.y);
+      const lenB = Math.hypot(otherB.x - corner.x, otherB.y - corner.y);
+      if (fillet.t > lenA - 0.3 + 1e-9) return { ok: false as const, reason: `Radius terlalu besar untuk ${fullA.name} (sisa kurang dari 0,3 m).` };
+      if (fillet.t > lenB - 0.3 + 1e-9) return { ok: false as const, reason: `Radius terlalu besar untuk ${fullB.name} (sisa kurang dari 0,3 m).` };
+      for (const w of [fullA, fullB]) {
+        const atCorner = normalizePointsEqual(w.p1, corner);
+        for (const o of w.openings ?? []) {
+          const half = o.width_meters / 2;
+          const distCorner = atCorner ? o.offset_meters : w.length_meters - o.offset_meters;
+          if (distCorner - half < fillet.t - 1e-9) {
+            return { ok: false as const, reason: `Ada ${o.type === 'pintu' ? 'pintu' : 'jendela'} di ${w.name} yang terpotong. Geser dulu bukaannya.` };
+          }
+        }
+      }
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      const trimA = { x: r2(fillet.trimA.x), y: r2(fillet.trimA.y) };
+      const trimB = { x: r2(fillet.trimB.x), y: r2(fillet.trimB.y) };
+      const sag = r2(fillet.sagitta);
+      const maxNum = Math.max(...walls.map((w) => { const m = w.name.match(/W-(\d+)/); return m ? parseInt(m[1], 10) : 0; }), 0);
+      const arcId = `w-${Date.now()}-fillet`;
+      const arcName = `W-${String(maxNum + 1).padStart(2, '0')}`;
+      const nextWalls = walls.map((w) => {
+        if (w.id === fullA.id) {
+          const cutP1 = normalizePointsEqual(w.p1, corner);
+          const nw = cutP1 ? { ...w, p1: trimA } : { ...w, p2: trimA };
+          const sized = { ...nw, length_meters: wallLength(nw.p1, nw.p2) };
+          // Ujung p1 dipotong sejauh t: offset bukaan digeser agar posisi dunia tetap.
+          return cutP1 ? shiftOpenings(sized, fillet.t) : sized;
+        }
+        if (w.id === fullB.id) {
+          const cutP1 = normalizePointsEqual(w.p1, corner);
+          const nw = cutP1 ? { ...w, p1: trimB } : { ...w, p2: trimB };
+          const sized = { ...nw, length_meters: wallLength(nw.p1, nw.p2) };
+          return cutP1 ? shiftOpenings(sized, fillet.t) : sized;
+        }
+        return w;
+      });
+      const arcWall: Wall = {
+        id: arcId, name: arcName, p1: trimA, p2: trimB,
+        length_meters: arcLength(trimA, trimB, sag),
+        height_meters: fullA.height_meters, brick_type: fullA.brick_type,
+        mortar_ratio: fullA.mortar_ratio, openings: [], arc_sagitta_m: sag,
+      };
+      lastSagEditId = null;
+      set({
+        walls: [...nextWalls, arcWall], selectedId: arcId, cornerPoint: null,
+        past: [...past, { walls, selectedId }].slice(-50), future: [],
+      });
+      return { ok: true as const };
+    },
+
+    unroundCorner: () => {
+      const { walls, selectedId, past } = get();
+      const fillet = findCornerFillet(walls);
+      if (!fillet) return { ok: false as const, reason: 'Tidak ada sudut bulat yang bisa diluruskan.' };
+      const arc = walls.find((w) => w.id === fillet.arcId);
+      const hostA = walls.find((w) => w.id === fillet.wallAId);
+      const hostB = walls.find((w) => w.id === fillet.wallBId);
+      if (!arc || !hostA || !hostB) return { ok: false as const, reason: 'Dinding fillet tidak lengkap.' };
+      const corner = fillet.corner;
+      const pickEnd = (w: Wall): 'p1' | 'p2' => {
+        const d1 = Math.hypot(w.p1.x - arc.p1.x, w.p1.y - arc.p1.y) + Math.hypot(w.p1.x - arc.p2.x, w.p1.y - arc.p2.y);
+        const d2 = Math.hypot(w.p2.x - arc.p1.x, w.p2.y - arc.p1.y) + Math.hypot(w.p2.x - arc.p2.x, w.p2.y - arc.p2.y);
+        return d1 <= d2 ? 'p1' : 'p2';
+      };
+      const nextWalls = walls
+        .filter((w) => w.id !== arc.id)
+        .map((w) => {
+          if (w.id === hostA.id || w.id === hostB.id) {
+            const end = pickEnd(w);
+            const nw = end === 'p1' ? { ...w, p1: { ...corner } } : { ...w, p2: { ...corner } };
+            return { ...nw, length_meters: wallLength(nw.p1, nw.p2) };
+          }
+          return w;
+        });
+      lastSagEditId = null;
+      set({
+        walls: nextWalls, selectedId: hostA.id, cornerPoint: null,
+        past: [...past, { walls, selectedId }].slice(-50), future: [],
+      });
+      return { ok: true as const };
     },
   };
 }, {

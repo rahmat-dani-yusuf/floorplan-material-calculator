@@ -302,6 +302,112 @@ export function effectiveWallLength(w: { p1: Point; p2: Point; arc_sagitta_m?: n
   return arcLength(w.p1, w.p2, s);
 }
 
+/** Geometri fillet sudut: titik singgung + sagitta busur dari sudut & radius. */
+export function cornerFillet(
+  corner: Point, dirA: Point, dirB: Point, radius: number,
+): { t: number; turnAngle: number; trimA: Point; trimB: Point; arcMid: Point; sagitta: number } | null {
+  const la = Math.hypot(dirA.x, dirA.y) || 1;
+  const lb = Math.hypot(dirB.x, dirB.y) || 1;
+  const ua = { x: dirA.x / la, y: dirA.y / la };
+  const ub = { x: dirB.x / lb, y: dirB.y / lb };
+  const dot = Math.max(-1, Math.min(1, ua.x * ub.x + ua.y * ub.y));
+  const angle = Math.acos(dot); // sudut belokan (0 = lurus, π = putar balik)
+  if (!(angle > 1e-6) || !(angle < Math.PI - 1e-6)) return null;
+  if (!(radius > 1e-9)) return null;
+  const t = radius / Math.tan(angle / 2);
+  if (!(t > 1e-9) || !Number.isFinite(t)) return null;
+  const trimA = { x: corner.x + ua.x * t, y: corner.y + ua.y * t };
+  const trimB = { x: corner.x + ub.x * t, y: corner.y + ub.y * t };
+  // Garis bagi arah dalam (menjauhi sudut ke pusat lingkaran).
+  let bx = ua.x + ub.x; let by = ua.y + ub.y;
+  const bl = Math.hypot(bx, by);
+  if (bl < 1e-9) return null;
+  bx /= bl; by /= bl;
+  const dist = radius / Math.sin(angle / 2);
+  const center = { x: corner.x + bx * dist, y: corner.y + by * dist };
+  // Puncak busur: titik lingkaran terdekat ke sudut, arah dari pusat ke sudut.
+  const vx = corner.x - center.x; const vy = corner.y - center.y;
+  const vl = Math.hypot(vx, vy) || 1;
+  const arcMid = { x: center.x + (vx / vl) * radius, y: center.y + (vy / vl) * radius };
+  // Sagitta bertanda: + bila busur menonjol ke kiri arah trimA→trimB.
+  const mx = (trimA.x + trimB.x) / 2; const my = (trimA.y + trimB.y) / 2;
+  const abx = trimB.x - trimA.x; const aby = trimB.y - trimA.y;
+  const abl = Math.hypot(abx, aby) || 1;
+  const nx = -aby / abl; const ny = abx / abl;
+  const sagitta = (arcMid.x - mx) * nx + (arcMid.y - my) * ny;
+  return { t, turnAngle: angle, trimA, trimB, arcMid, sagitta };
+}
+
+/** Cari sudut tajam: titik yang dipakai tepat 2 dinding lurus (bukan pertigaan). */
+export function findSharpCorner(
+  walls: { id: string; p1: Point; p2: Point; arc_sagitta_m?: number }[],
+  pt: Point,
+  tol = 0.001,
+): { corner: Point; wallA: { id: string; p1: Point; p2: Point }; wallB: { id: string; p1: Point; p2: Point } } | null {
+  const hits: { id: string; p1: Point; p2: Point }[] = [];
+  for (const w of walls) {
+    const s = w.arc_sagitta_m || 0;
+    if (s && Math.abs(s) >= 1e-9) continue; // hanya sudut dari dinding lurus
+    if (Math.hypot(pt.x - w.p1.x, pt.y - w.p1.y) <= tol || Math.hypot(pt.x - w.p2.x, pt.y - w.p2.y) <= tol) {
+      hits.push(w);
+    }
+  }
+  if (hits.length !== 2) return null;
+  const [a, b] = hits;
+  if (a.id === b.id) return null;
+  return { corner: { ...pt }, wallA: a, wallB: b };
+}
+
+/** Cari busur fillet yang menghubungkan tepat dua dinding di titik potongnya. */
+export function findCornerFillet(
+  walls: { id: string; p1: Point; p2: Point; arc_sagitta_m?: number }[],
+  tol = 0.02,
+): { arcId: string; corner: Point; wallAId: string; wallBId: string } | null {
+  for (const w of walls) {
+    const s = w.arc_sagitta_m || 0;
+    if (!s || Math.abs(s) < 1e-9) continue;
+    // Ujung busur harus menempel tepat di badan dua dinding lain.
+    const ends: { wallId: string; pt: Point }[] = [];
+    for (const end of [w.p1, w.p2]) {
+      const host = walls.find((o) => {
+        if (o.id === w.id) return false;
+        const os = o.arc_sagitta_m || 0;
+        if (os && Math.abs(os) >= 1e-9) return false;
+        return distancePointToSegment(end, o.p1, o.p2) <= tol;
+      });
+      if (!host) { ends.length = 0; break; }
+      ends.push({ wallId: host.id, pt: end });
+    }
+    if (ends.length !== 2 || ends[0].wallId === ends[1].wallId) continue;
+    const [ea, eb] = ends;
+    const hostA = walls.find((x) => x.id === ea.wallId);
+    const hostB = walls.find((x) => x.id === eb.wallId);
+    if (!hostA || !hostB) continue;
+    // Titik temu perpanjangan kedua dinding = sudut asal.
+    const corner = lineIntersection(hostA.p1, hostA.p2, hostB.p1, hostB.p2);
+    if (!corner) continue;
+    // Sudut asal tidak boleh dipakai dinding lain (harus tinggal sisa potongan).
+    const users = walls.filter((o) => {
+      if (o.id === w.id) return false;
+      return Math.hypot(corner.x - o.p1.x, corner.y - o.p1.y) <= tol
+        || Math.hypot(corner.x - o.p2.x, corner.y - o.p2.y) <= tol;
+    });
+    if (users.length !== 0) continue;
+    return { arcId: w.id, corner, wallAId: ea.wallId, wallBId: eb.wallId };
+  }
+  return null;
+}
+
+/** Titik temu dua garis (bukan segmen). Null bila sejajar. */
+export function lineIntersection(a1: Point, a2: Point, b1: Point, b2: Point): Point | null {
+  const d1x = a2.x - a1.x; const d1y = a2.y - a1.y;
+  const d2x = b2.x - b1.x; const d2y = b2.y - b1.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-9) return null;
+  const t = ((b1.x - a1.x) * d2y - (b1.y - a1.y) * d2x) / denom;
+  return { x: a1.x + d1x * t, y: a1.y + d1y * t };
+}
+
 /** Toleransi titik menempel pada kurva busur/tali (meter). */
 export const ARC_ATTACH_TOL = 0.02;
 

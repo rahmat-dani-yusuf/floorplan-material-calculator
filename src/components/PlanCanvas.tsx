@@ -26,6 +26,8 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
   const setWallLength = useWallStore((s) => s.setWallLength);
 
   const setArcSagitta = useWallStore((s) => s.setArcSagitta);
+  const cornerPoint = useWallStore((s) => s.cornerPoint);
+  const selectCorner = useWallStore((s) => s.selectCorner);
 
   const [scale, setScale] = useState(50);
   const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
@@ -254,6 +256,21 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         }
         if (best) {
           selectWall(best.w.id);
+          // Ketuk titik sudut (tanpa seret) memilih sudut untuk panel "Bulatkan sudut".
+          const tapCorner = (() => {
+            const pts: Point[] = [];
+            for (const w of wallsRef.current) {
+              const s = w.arc_sagitta_m || 0;
+              if (s && Math.abs(s) >= 1e-9) continue;
+              pts.push(w.p1, w.p2);
+            }
+            let found: Point | null = null;
+            for (const p of pts) {
+              if (distance(wpt, p) < 0.22 && (!found || distance(wpt, p) < distance(wpt, found))) found = p;
+            }
+            return found;
+          })();
+          if (tapCorner) selectCorner({ ...tapCorner });
           // Sentuh tepat pada bukaan (diukur sepanjang busur) = tetap pilih
           // dindingnya, tanpa mulai drag vertex/handle.
           for (const o of best.w.openings ?? []) {
@@ -597,6 +614,10 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
           {/* snap indicator */}
           {snapTarget && (
             <Circle cx={ptScreen(snapTarget).x} cy={ptScreen(snapTarget).y} r={10} fill="none" stroke="#fbbf24" strokeWidth={2} />
+          )}
+          {/* penanda titik sudut terpilih untuk Bulatkan sudut */}
+          {cornerPoint && (
+            <Circle cx={ptScreen(cornerPoint).x} cy={ptScreen(cornerPoint).y} r={10} fill="none" stroke="#4ade80" strokeWidth={2.5} />
           )}
           {/* preview draw */}
           {prestart && preend && (

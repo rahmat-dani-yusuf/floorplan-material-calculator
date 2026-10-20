@@ -139,6 +139,9 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const removeFloor = useWallStore((s) => s.removeFloor);
   const [copyFromBelow, setCopyFromBelow] = useState(true);
   const [arcRadiusText, setArcRadiusText] = useState('');
+  const [cornerRadiusText, setCornerRadiusText] = useState('0,3');
+  const cornerPoint = useWallStore((s) => s.cornerPoint);
+  const selectCorner = useWallStore((s) => s.selectCorner);
   const wall = selectActiveWall(s);
 
   const tool = (label: string, onPress: () => void, enabled = true, danger = false) => (
@@ -388,6 +391,78 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
         </View>
         <ChipGroup label="Jenis Bata" options={BRICKS} selected={wall.brick_type} onSelect={s.setBrickType} />
         <ChipGroup label="Tipe Adukan" options={MORTARS} selected={wall.mortar_ratio} onSelect={s.setMortarRatio} />
+
+        {/* Sudut: bulatkan / luruskan kembali */}
+        <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ color: C.text, fontSize: 12, fontWeight: '700' }}>Sudut</Text>
+            {cornerPoint
+              ? <Text style={{ color: C.secondary, fontSize: 11 }}>({cornerPoint.x.toFixed(2)}, {cornerPoint.y.toFixed(2)})</Text>
+              : <Text style={{ color: C.textDim, fontSize: 11 }}>Ketuk titik sudut di kanvas</Text>}
+          </View>
+          <Text style={{ color: C.textDim, fontSize: 11, marginTop: 6 }}>Radius (m)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <Pressable
+              onPress={() => {
+                const cur = parseFloat((cornerRadiusText || '0').replace(',', '.'));
+                const next = Math.max(0, Math.round(((Number.isFinite(cur) ? cur : 0.3) - 0.1) * 100) / 100);
+                setCornerRadiusText(String(next).replace('.', ','));
+              }}
+              style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
+            >
+              <Text style={{ color: C.text }}>−</Text>
+            </Pressable>
+            <TextInput
+              value={cornerRadiusText}
+              onChangeText={setCornerRadiusText}
+              keyboardType="decimal-pad"
+              placeholder="0,3"
+              placeholderTextColor={C.outline}
+              style={{ flex: 1, backgroundColor: C.bg, borderRadius: 6, padding: 8, color: C.text, fontSize: 13, textAlign: 'center' }}
+            />
+            <Pressable
+              onPress={() => {
+                const cur = parseFloat((cornerRadiusText || '0').replace(',', '.'));
+                const next = Math.round(((Number.isFinite(cur) ? cur : 0.3) + 0.1) * 100) / 100;
+                setCornerRadiusText(String(next).replace('.', ','));
+              }}
+              style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
+            >
+              <Text style={{ color: C.text }}>+</Text>
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
+            <Pressable
+              onPress={() => {
+                if (!cornerPoint) { Alert.alert('Belum ada sudut', 'Ketuk titik sudut di kanvas pada mode Pilih.'); return; }
+                const r = parseFloat((cornerRadiusText || '0').replace(',', '.'));
+                if (!(r > 0)) { Alert.alert('Radius tidak valid', 'Masukkan radius lebih dari 0, contoh 0,3.'); return; }
+                const res = s.roundCorner(cornerPoint, r);
+                if (!res.ok) Alert.alert('Tidak bisa dibulatkan', res.reason);
+              }}
+              style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: C.primary, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Bulatkan</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                const res = s.unroundCorner();
+                if (!res.ok) Alert.alert('Tidak bisa diluruskan', res.reason);
+              }}
+              style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
+            >
+              <Text style={{ color: C.text, fontWeight: '700', fontSize: 12 }}>Lurus kembali</Text>
+            </Pressable>
+            {cornerPoint && (
+              <Pressable
+                onPress={() => selectCorner(null)}
+                style={{ padding: 10, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
+              >
+                <Text style={{ color: C.text, fontSize: 12 }}>Batal</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
 
         {/* Dinding melengkung */}
         {(() => {
