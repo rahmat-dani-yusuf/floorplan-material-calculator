@@ -102,28 +102,42 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelH, setPanelH] = useState<number | null>(null); // tinggi panel bawah (px); null = default flex
   const { height: winH } = useWindowDimensions();
-  const panelHRef = useRef<number | null>(null);
-  panelHRef.current = panelH;
+  // Tinggi TERUKUR panel (layout aktual), bukan nilai state — state bisa null
+  // (default flex) sehingga membaca state saat grant memberi 320 yang salah.
+  const panelMeasuredHRef = useRef(320);
   const dragStartHRef = useRef(320);
+  // Batas seret mengikuti tinggi layar terbaru tanpa membuat ulang PanResponder.
+  const panelLimitsRef = useRef({ minH: 120, maxH: 480 });
+  panelLimitsRef.current = (() => {
+    const minH = 120;
+    const maxH = Math.max(minH + 40, winH - Math.round(winH * 0.35) - 150);
+    return { minH, maxH };
+  })();
+  const setPanelHRef = useRef(setPanelH);
+  setPanelHRef.current = setPanelH;
+  const clampPanelH = (h: number) => {
+    const { minH, maxH } = panelLimitsRef.current;
+    return Math.round(Math.min(Math.max(h, minH), maxH));
+  };
 
   // Handle seret di tepi atas panel: PanResponder tersendiri (terpisah dari
   // gesture kanvas) sehingga tidak bentrok dengan pan/zoom/gambar dinding.
+  // Dibuat sekali (dep kosong): grant menyimpan tinggi aktual di ref, move
+  // memakai startHeightRef - gs.dy secara kontinu tanpa snapping.
   const panelDrag = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dy) > 3 && Math.abs(gs.dy) > Math.abs(gs.dx),
     onPanResponderGrant: () => {
-      dragStartHRef.current = panelHRef.current ?? 320;
+      dragStartHRef.current = panelMeasuredHRef.current;
     },
     onPanResponderMove: (_e, gs) => {
       // Seret ke atas (dy negatif) = panel membesar; ke bawah = mengecil.
-      // Batas min: handle + bar "+ Ruangan" (~120px). Batas maks: kanvas
-      // menyisakan min ~35% tinggi layar untuk kanvas (+ header ~150px).
-      const minH = 120;
-      const maxH = Math.max(minH + 40, winH - Math.round(winH * 0.35) - 150);
-      const next = Math.min(Math.max(dragStartHRef.current - gs.dy, minH), maxH);
-      setPanelH(Math.round(next));
+      // Kontinu mengikuti jari/mouse; posisi akhir dipertahankan saat dilepas.
+      const next = clampPanelH(dragStartHRef.current - gs.dy);
+      setPanelHRef.current(next);
     },
-  }), [winH]);
+    onPanResponderTerminationRequest: () => false,
+  }), []);
   const addRoom = useWallStore((s) => s.addRoom);
   const loadPlan = useWallStore((s) => s.loadPlan);
   const loadWalls = useWallStore((s) => s.loadWalls);
@@ -282,11 +296,28 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel */}
       <View
         {...panelDrag.panHandlers}
-        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 8, paddingBottom: 2, alignItems: 'center' }}
+        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6, paddingBottom: 6, alignItems: 'center', minHeight: 32, justifyContent: 'center' }}
       >
         <View style={{ width: 56, height: 5, borderRadius: 3, backgroundColor: C.outline }} />
+        <View style={{ position: 'absolute', right: 10, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Pressable
+            onPress={() => setPanelH((h) => clampPanelH((h ?? panelMeasuredHRef.current) - 80))}
+            hitSlop={8}
+            style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: C.surfaceHighest }}
+          >
+            <Text style={{ color: C.text, fontSize: 11, fontWeight: '700' }}>Kecilkan</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setPanelH((h) => clampPanelH((h ?? panelMeasuredHRef.current) + 80))}
+            hitSlop={8}
+            style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: C.surfaceHighest }}
+          >
+            <Text style={{ color: C.text, fontSize: 11, fontWeight: '700' }}>Besarkan</Text>
+          </Pressable>
+        </View>
       </View>
       <ScrollView
+        onLayout={(e) => { panelMeasuredHRef.current = Math.round(e.nativeEvent.layout.height); }}
         style={[{ flex: 1, backgroundColor: C.surfaceHigh }, panelH != null ? { flex: 0, height: panelH } : null]}
         contentContainerStyle={{ padding: 16, gap: 12 }}
       >
