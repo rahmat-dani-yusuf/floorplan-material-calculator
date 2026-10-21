@@ -271,6 +271,10 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           {tool('↶ Undo', s.undo, s.past.length > 0)}
           {tool('↷ Redo', s.redo, s.future.length > 0)}
           {tool('Reset', () => confirm('Reset Denah', 'Semua dinding akan dikembalikan ke kondisi awal?', () => s.reset()), true, true)}
+          {tool('Rapikan Sudut', () => {
+            const n = s.rapikanSudut();
+            Alert.alert('Rapikan Sudut', n > 0 ? `${n} sambungan dirapikan` : 'Sudah rapi');
+          }, true)}
           {onOpenPrices ? tool('Harga', onOpenPrices, true) : null}
           {onOpenProjects ? tool('Proyek', onOpenProjects, true) : null}
           {tool('Template', () => setTemplateModal(true), true)}

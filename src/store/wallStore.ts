@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
-import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL, cornerFillet, findSharpCorner, findCornerFillet } from '../utils/geometry';
+import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL, cornerFillet, findSharpCorner, findCornerFillet, lineIntersection } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
 import { defaultFloor } from '../types';
 import { clampOffset } from '../utils/openings';
@@ -175,6 +175,7 @@ interface WallStore {
   flipArc: (id: string) => void;
   roundCorner: (point: Point, radius: number) => { ok: true } | { ok: false; reason: string };
   unroundCorner: () => { ok: true } | { ok: false; reason: string };
+  rapikanSudut: () => number;
   selectCorner: (p: Point | null) => void;
   clearCornerSelection: () => void;
   cornerPoint: Point | null;
@@ -790,6 +791,104 @@ export const useWallStore = create<WallStore>()(
         past: [...past, { walls, selectedId }].slice(-50), future: [],
       });
       return { ok: true as const };
+    },
+
+    // Rapikan sudut: ujung dinding yang menggantung (dipakai satu dinding)
+    // dirapikan ke dinding lain: (1) ke titik sambungan yang dipakai >= 2 dinding
+    // bila berjarak <= 0,6 m; (2) jika tidak ada, ke titik potong garis dinding
+    // dengan segmen dinding lain (trim/extend) bila jaraknya < 1,5 m.
+    // Dinding lengkung diabaikan. Satu panggilan = satu langkah undo.
+    rapikanSudut: () => {
+      const { walls, selectedId, past } = get();
+      const MAX_JOIN_DIST = 0.6;   // jangkauan titik sambungan (m)
+      const MAX_TRIM_DIST = 1.5;   // jangkauan trim/extend (m)
+      const SEG_TOL = 0.05;        // toleransi ujung segmen B (m)
+      const EPS = 0.001;
+      const MIN_LEN = 0.3;         // dinding A tidak boleh < 0,3 m
+      let nextWalls = walls.map((w) => ({ ...w }));
+      const movedEnds = new Set<string>();
+      const bump = (wallId: string, end: 'p1' | 'p2') => {
+        movedEnds.add(`${wallId}:${end}`);
+      };
+      const isCurved = (w: Wall) => !!w.arc_sagitta_m && Math.abs(w.arc_sagitta_m) >= 1e-9;
+
+      for (let pass = 0; pass < 8; pass++) {
+        // Kelompok titik ujung (hanya dinding lurus) + jumlah dinding pemakainya.
+        type EndRef = { wallId: string; end: 'p1' | 'p2' };
+        const groups: { pt: Point; wallIds: string[]; ends: EndRef[] }[] = [];
+        for (const w of nextWalls) {
+          if (isCurved(w)) continue;
+          for (const end of ['p1', 'p2'] as const) {
+            const pt = w[end];
+            let g = groups.find((gg) => Math.abs(gg.pt.x - pt.x) < EPS && Math.abs(gg.pt.y - pt.y) < EPS);
+            if (!g) { g = { pt: { x: pt.x, y: pt.y }, wallIds: [], ends: [] }; groups.push(g); }
+            if (!g.wallIds.includes(w.id)) g.wallIds.push(w.id);
+            g.ends.push({ wallId: w.id, end });
+          }
+        }
+        // Titik sambungan: dipakai >= 2 dinding.
+        const shared = groups.filter((g) => g.wallIds.length >= 2);
+        let changed = false;
+
+        for (const g of groups) {
+          if (g.wallIds.length !== 1) continue; // bukan ujung menggantung
+          const ref = g.ends[0];
+          const idx = nextWalls.findIndex((x) => x.id === ref.wallId);
+          if (idx === -1) continue;
+          const cur = nextWalls[idx];
+          const E = cur[ref.end];               // ujung yang digantung
+          const O = ref.end === 'p1' ? cur.p2 : cur.p1; // ujung-other (acuan garis AO)
+
+          // Kandidat tujuan: titik sambungan terdekat, atau titik potong garis AO
+          // dengan segmen dinding lain (trim/extend).
+          let best: Point | null = null;
+          let bestD = Infinity;
+
+          // (1) titik sambungan (dipakai >= 2 dinding) dalam 0,6 m
+          for (const s of shared) {
+            if (s.wallIds.includes(ref.wallId)) continue;
+            const d = Math.hypot(s.pt.x - E.x, s.pt.y - E.y);
+            if (d <= MAX_JOIN_DIST && d < bestD) { bestD = d; best = { x: s.pt.x, y: s.pt.y }; }
+          }
+
+          // (2) titik potong garis AO dengan segmen dinding lain B
+          if (!best) {
+            for (const B of nextWalls) {
+              if (B.id === cur.id || isCurved(B)) continue;
+              const X = lineIntersection(O, E, B.p1, B.p2);
+              if (!X) continue;
+              // X harus berada di segmen B (toleransi 0,05 m di ujungnya).
+              const dSeg = distancePointToSegment(X, B.p1, B.p2);
+              if (dSeg > SEG_TOL) continue;
+              const dE = Math.hypot(X.x - E.x, X.y - E.y);
+              if (dE >= MAX_TRIM_DIST) continue;
+              if (dE < bestD) { bestD = dE; best = { x: X.x, y: X.y }; }
+            }
+          }
+
+          if (!best || bestD < 1e-9) continue;
+          // Jangan sampai ujung ini bertumpuk dengan ujung lawan (wall nol).
+          if (Math.abs(O.x - best.x) < EPS && Math.abs(O.y - best.y) < EPS) continue;
+          const nw = ref.end === 'p1' ? { ...cur, p1: best } : { ...cur, p2: best };
+          if (wallLength(nw.p1, nw.p2) < MIN_LEN) continue;
+          const oldLen = cur.length_meters;
+          const sized = { ...nw, length_meters: wallLength(nw.p1, nw.p2) };
+          // Proporsi posisi pintu/jendela dijaga saat panjang berubah.
+          nextWalls[idx] = rescaleOpenings(oldLen, sized);
+          bump(ref.wallId, ref.end);
+          changed = true;
+        }
+        if (!changed) break;
+      }
+
+      if (movedEnds.size === 0) return 0;
+      set({
+        walls: nextWalls,
+        past: [...past, { walls, selectedId }].slice(-50),
+        future: [],
+      });
+      syncActiveFloor();
+      return movedEnds.size;
     },
   };
 }, {
