@@ -105,14 +105,22 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   // Tinggi TERUKUR panel (layout aktual), bukan nilai state — state bisa null
   // (default flex) sehingga membaca state saat grant memberi 320 yang salah.
   const panelMeasuredHRef = useRef(320);
-  const dragStartHRef = useRef(320);
+  // Tinggi awal gesture: diisi saat grant, dibaca saat move (tidak dari state).
+  const startHeightRef = useRef(320);
   // Batas seret mengikuti tinggi layar terbaru tanpa membuat ulang PanResponder.
+  // Batas WAJIB memuat tinggi panel saat ini: kalau tidak, begitu digerakkan
+  // nilai langsung terpental ke min/max (efek "loncat"), bukan mengikuti jari.
   const panelLimitsRef = useRef({ minH: 120, maxH: 480 });
-  panelLimitsRef.current = (() => {
-    const minH = 120;
-    const maxH = Math.max(minH + 40, winH - Math.round(winH * 0.35) - 150);
-    return { minH, maxH };
-  })();
+  const baseMinH = 120;
+  const baseMaxH = Math.max(baseMinH + 40, winH - Math.round(winH * 0.35) - 150);
+  const measuredH = panelMeasuredHRef.current;
+  panelLimitsRef.current = {
+    minH: Math.min(baseMinH, measuredH),
+    maxH: Math.max(baseMaxH, measuredH),
+  };
+  // Batas BEKU selama satu gesture: dibuat ulang hanya saat grant. Kalau batas
+  // ikut bergeser tiap render, panel bisa tumbuh melewati batas atas.
+  const gestureLimitsRef = useRef<{ minH: number; maxH: number }>({ minH: 120, maxH: 480 });
   const setPanelHRef = useRef(setPanelH);
   setPanelHRef.current = setPanelH;
   const clampPanelH = (h: number) => {
@@ -128,12 +136,16 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dy) > 3 && Math.abs(gs.dy) > Math.abs(gs.dx),
     onPanResponderGrant: () => {
-      dragStartHRef.current = panelMeasuredHRef.current;
+      // Simpan tinggi panel saat gesture dimulai (bukan dari state).
+      startHeightRef.current = panelMeasuredHRef.current;
+      // Bekukan batas seret untuk gesture ini.
+      gestureLimitsRef.current = { ...panelLimitsRef.current };
     },
     onPanResponderMove: (_e, gs) => {
       // Seret ke atas (dy negatif) = panel membesar; ke bawah = mengecil.
       // Kontinu mengikuti jari/mouse; posisi akhir dipertahankan saat dilepas.
-      const next = clampPanelH(dragStartHRef.current - gs.dy);
+      const { minH, maxH } = gestureLimitsRef.current;
+      const next = Math.round(Math.min(Math.max(startHeightRef.current - gs.dy, minH), maxH));
       setPanelHRef.current(next);
     },
     onPanResponderTerminationRequest: () => false,
@@ -300,7 +312,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel */}
       <View
         {...panelDrag.panHandlers}
-        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6, paddingBottom: 6, alignItems: 'center', minHeight: 32, justifyContent: 'center' }}
+        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6, paddingBottom: 6, alignItems: 'center', minHeight: 40, justifyContent: 'center' }}
       >
         <View style={{ width: 56, height: 5, borderRadius: 3, backgroundColor: C.outline }} />
         <View style={{ position: 'absolute', right: 10, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
