@@ -8,13 +8,21 @@ export default function TemplateModal({ visible, onSelect, onBatal }: { visible:
       <View style={styles.overlay}>
         <View style={styles.card}>
           <Text style={styles.title}>Pilih Template</Text>
+          <Pressable onPress={() => onSelect('21')} style={styles.option}>
+            <Text style={styles.optionText}>Rumah Tipe 21 (6 x 3,5 m)</Text>
+            <Text style={styles.desc}>21 m2 • 1 kamar • Minimalis: tamu, dapur, kamar, mandi</Text>
+          </Pressable>
+          <Pressable onPress={() => onSelect('45')} style={styles.option}>
+            <Text style={styles.optionText}>Rumah Tipe 45 (7,5 x 6 m)</Text>
+            <Text style={styles.desc}>45 m2 • 2 kamar • Ruang tamu, dapur, 2 kamar tidur</Text>
+          </Pressable>
           <Pressable onPress={() => onSelect('48')} style={styles.option}>
             <Text style={styles.optionText}>Rumah Tipe 48 (8 x 6 m)</Text>
             <Text style={styles.desc}>Dinding luar menyambung + sekat + 5 ruangan</Text>
           </Pressable>
           <Pressable onPress={() => onSelect('36')} style={styles.option}>
             <Text style={styles.optionText}>Rumah Tipe 36 (6 x 6 m)</Text>
-            <Text style={styles.desc}>Versi lebih kecil dengan ide yang sama</Text>
+            <Text style={styles.desc}>36 m2 • 2 kamar • Ruang tamu, dapur, 2 kamar tidur</Text>
           </Pressable>
           <Pressable onPress={onBatal} style={[styles.btn, { backgroundColor: '#334155' }]}>
             <Text style={styles.btnText}>Batal</Text>

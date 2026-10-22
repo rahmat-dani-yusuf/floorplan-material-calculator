@@ -238,21 +238,71 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
         { id: 'r-4', name: 'Kamar 2', seed: { x: 4.5, y: 4.5 } },
         { id: 'r-5', name: 'Kamar Mandi', seed: { x: 7, y: 4.5 } },
       ]);
-    } else if (template === '36') {
+    } else if (template === '21') {
       loadWalls([
-        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 6, y: 0 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 2, swing: 1 }] },
-        { id: 'w-2', name: 'W-02', p1: { x: 6, y: 0 }, p2: { x: 6, y: 6 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-3', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
-        { id: 'w-3', name: 'W-03', p1: { x: 6, y: 6 }, p2: { x: 0, y: 6 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-5', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
-        { id: 'w-4', name: 'W-04', p1: { x: 0, y: 6 }, p2: { x: 0, y: 0 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-6', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-7', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
-        { id: 'w-5', name: 'W-05', p1: { x: 0, y: 3 }, p2: { x: 6, y: 3 }, length_meters: 6, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-8', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }, { id: 'o-9', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 4.5, swing: 1 }] },
-        { id: 'w-6', name: 'W-06', p1: { x: 3, y: 0 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-10', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
-        { id: 'w-7', name: 'W-07', p1: { x: 3, y: 3 }, p2: { x: 3, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-11', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 3, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-2', name: 'W-02', p1: { x: 3, y: 0 }, p2: { x: 6, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'jendela', width_meters: 0.6, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-3', name: 'W-03', p1: { x: 6, y: 0 }, p2: { x: 6, y: 1.5 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-4', name: 'W-04', p1: { x: 6, y: 1.5 }, p2: { x: 6, y: 3.5 }, length_meters: 2, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1, swing: 1 }] },
+        { id: 'w-5', name: 'W-05', p1: { x: 6, y: 3.5 }, p2: { x: 3, y: 3.5 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-3', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-6', name: 'W-06', p1: { x: 3, y: 3.5 }, p2: { x: 0, y: 3.5 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-7', name: 'W-07', p1: { x: 0, y: 3.5 }, p2: { x: 0, y: 0 }, length_meters: 3.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.75, swing: 1 }] },
+        { id: 'w-8', name: 'W-08', p1: { x: 3, y: 0 }, p2: { x: 3, y: 1.5 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-9', name: 'W-09', p1: { x: 3, y: 1.5 }, p2: { x: 3, y: 3.5 }, length_meters: 2, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-5', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1, swing: 1 }] },
+        { id: 'w-10', name: 'W-10', p1: { x: 3, y: 1.5 }, p2: { x: 6, y: 1.5 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-6', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
       ] as any);
       setRooms([
-        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 1.5, y: 1.5 } },
+        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 1.5, y: 0.75 } },
+        { id: 'r-2', name: 'Dapur', seed: { x: 4.5, y: 0.75 } },
+        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 2.5 } },
+        { id: 'r-4', name: 'Kamar Mandi', seed: { x: 4.5, y: 2.5 } },
+      ]);
+    } else if (template === '36') {
+      loadWalls([
+        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 3, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-2', name: 'W-02', p1: { x: 3, y: 0 }, p2: { x: 6, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-3', name: 'W-03', p1: { x: 6, y: 0 }, p2: { x: 6, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-4', name: 'W-04', p1: { x: 6, y: 3 }, p2: { x: 6, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: 0.6, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-5', name: 'W-05', p1: { x: 6, y: 6 }, p2: { x: 4.5, y: 6 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-6', name: 'W-06', p1: { x: 4.5, y: 6 }, p2: { x: 0, y: 6 }, length_meters: 4.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-3', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 2.25, swing: 1 }] },
+        { id: 'w-7', name: 'W-07', p1: { x: 0, y: 6 }, p2: { x: 0, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-8', name: 'W-08', p1: { x: 0, y: 3 }, p2: { x: 0, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-5', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-9', name: 'W-09', p1: { x: 0, y: 3 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-6', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-10', name: 'W-10', p1: { x: 3, y: 3 }, p2: { x: 4.5, y: 3 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-7', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 0.75, swing: 1 }] },
+        { id: 'w-11', name: 'W-11', p1: { x: 4.5, y: 3 }, p2: { x: 6, y: 3 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-12', name: 'W-12', p1: { x: 3, y: 0 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-13', name: 'W-13', p1: { x: 4.5, y: 3 }, p2: { x: 4.5, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-8', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+      ] as any);
+      setRooms([
+        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 2.25, y: 4.5 } },
         { id: 'r-2', name: 'Dapur', seed: { x: 4.5, y: 1.5 } },
-        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 4.5 } },
-        { id: 'r-4', name: 'Kamar 2', seed: { x: 4.5, y: 4.5 } },
+        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 1.5 } },
+        { id: 'r-4', name: 'Kamar 2', seed: { x: 5.25, y: 4.5 } },
+      ]);
+    } else if (template === '45') {
+      loadWalls([
+        { id: 'w-1', name: 'W-01', p1: { x: 0, y: 0 }, p2: { x: 3, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-2', name: 'W-02', p1: { x: 3, y: 0 }, p2: { x: 6, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-1', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-3', name: 'W-03', p1: { x: 6, y: 0 }, p2: { x: 7.5, y: 0 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-2', type: 'jendela', width_meters: 0.6, height_meters: j.height_meters, quantity: 1, offset_meters: 0.75, swing: 1 }] },
+        { id: 'w-4', name: 'W-04', p1: { x: 7.5, y: 0 }, p2: { x: 7.5, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-5', name: 'W-05', p1: { x: 7.5, y: 3 }, p2: { x: 7.5, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-3', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-6', name: 'W-06', p1: { x: 7.5, y: 6 }, p2: { x: 4.5, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-7', name: 'W-07', p1: { x: 4.5, y: 6 }, p2: { x: 0, y: 6 }, length_meters: 4.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-4', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 2.25, swing: 1 }] },
+        { id: 'w-8', name: 'W-08', p1: { x: 0, y: 6 }, p2: { x: 0, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-5', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-9', name: 'W-09', p1: { x: 0, y: 3 }, p2: { x: 0, y: 0 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-6', type: 'jendela', width_meters: j.width_meters, height_meters: j.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-10', name: 'W-10', p1: { x: 0, y: 3 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-7', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+        { id: 'w-11', name: 'W-11', p1: { x: 3, y: 3 }, p2: { x: 4.5, y: 3 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-8', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 0.75, swing: 1 }] },
+        { id: 'w-12', name: 'W-12', p1: { x: 4.5, y: 3 }, p2: { x: 6, y: 3 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-13', name: 'W-13', p1: { x: 6, y: 3 }, p2: { x: 7.5, y: 3 }, length_meters: 1.5, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-9', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 0.75, swing: 1 }] },
+        { id: 'w-14', name: 'W-14', p1: { x: 3, y: 0 }, p2: { x: 3, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-15', name: 'W-15', p1: { x: 6, y: 0 }, p2: { x: 6, y: 3 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [] },
+        { id: 'w-16', name: 'W-16', p1: { x: 4.5, y: 3 }, p2: { x: 4.5, y: 6 }, length_meters: 3, height_meters: h, brick_type: brick, mortar_ratio: mortar, openings: [{ id: 'o-10', type: 'pintu', width_meters: p.width_meters, height_meters: p.height_meters, quantity: 1, offset_meters: 1.5, swing: 1 }] },
+      ] as any);
+      setRooms([
+        { id: 'r-1', name: 'Ruang Tamu', seed: { x: 2.25, y: 4.5 } },
+        { id: 'r-2', name: 'Dapur', seed: { x: 4.5, y: 1.5 } },
+        { id: 'r-3', name: 'Kamar 1', seed: { x: 1.5, y: 1.5 } },
+        { id: 'r-4', name: 'Kamar 2', seed: { x: 6.75, y: 4.5 } },
       ]);
     }
     setFitTrigger((v) => v + 1);
