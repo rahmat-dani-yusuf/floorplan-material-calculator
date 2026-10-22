@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Alert, Modal, PanResponder, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Alert, Modal, PanResponder, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import PlanCanvas from '../components/PlanCanvas';
 import Stepper from '../components/Stepper';
 import ChipGroup from '../components/ChipGroup';
@@ -21,6 +21,15 @@ const MORTARS: { value: MortarRatio; label: string }[] = [
   { value: '1:4', label: '1:4 Standar' },
   { value: '1:2', label: '1:2 Kedap Air' },
 ];
+
+// Gaya khusus web untuk handle seret panel: tanpa ini browser mengambil
+// gesture (drag gambar / scroll) sehingga PanResponder tidak menerima event.
+// `any` dipakai karena properti web (touchAction/cursor) tidak ada di tipe
+// ViewStyle native.
+const HANDLE_WEB_STYLE: any = Platform.select({
+  web: { touchAction: 'none', userSelect: 'none', cursor: 'row-resize' },
+  default: {},
+});
 
 /** Slider kelengkungan dua arah: tengah = lurus, ujung = setengah lingkaran.
  * Area sentuh 44px; hanya merebut gesture horizontal agar scroll panel tetap lancar. */
@@ -134,14 +143,16 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   // memakai startHeightRef - gs.dy secara kontinu tanpa snapping.
   const panelDrag = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_e, gs) => Math.abs(gs.dy) > 3 && Math.abs(gs.dy) > Math.abs(gs.dx),
+    onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => {
+      console.log('handle grant');
       // Simpan tinggi panel saat gesture dimulai (bukan dari state).
       startHeightRef.current = panelMeasuredHRef.current;
       // Bekukan batas seret untuk gesture ini.
       gestureLimitsRef.current = { ...panelLimitsRef.current };
     },
     onPanResponderMove: (_e, gs) => {
+      console.log('handle move', gs.dy);
       // Seret ke atas (dy negatif) = panel membesar; ke bawah = mengecil.
       // Kontinu mengikuti jari/mouse; posisi akhir dipertahankan saat dilepas.
       const { minH, maxH } = gestureLimitsRef.current;
@@ -149,6 +160,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       setPanelHRef.current(next);
     },
     onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
   }), []);
   const addRoom = useWallStore((s) => s.addRoom);
   const loadPlan = useWallStore((s) => s.loadPlan);
@@ -359,10 +371,21 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       {/* panel parameter — disembunyikan saat mode penuh */}
       {!isFullscreen && (
       <>
-      {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel */}
+      {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel.
+          Sengaja DI LUAR ScrollView agar gesture tidak direbut scroll panel. */}
       <View
         {...panelDrag.panHandlers}
-        style={{ backgroundColor: C.surfaceHigh, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingTop: 6, paddingBottom: 6, alignItems: 'center', minHeight: 40, justifyContent: 'center' }}
+        style={[
+          {
+            height: 32,
+            backgroundColor: C.surfaceHighest,
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          HANDLE_WEB_STYLE,
+        ]}
       >
         <View style={{ width: 56, height: 5, borderRadius: 3, backgroundColor: C.outline }} />
         <View style={{ position: 'absolute', right: 10, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -384,7 +407,9 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       </View>
       <ScrollView
         onLayout={(e) => { panelMeasuredHRef.current = Math.round(e.nativeEvent.layout.height); }}
-        style={[{ flex: 1, backgroundColor: C.surfaceHigh }, panelH != null ? { flex: 0, height: panelH } : null]}
+        style={panelH != null
+          ? { flexGrow: 0, flexShrink: 0, height: panelH, backgroundColor: C.surfaceHigh }
+          : { flex: 1, backgroundColor: C.surfaceHigh }}
         contentContainerStyle={{ padding: 16, gap: 12 }}
       >
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 4 }}>
