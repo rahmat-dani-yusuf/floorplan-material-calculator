@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LIMITS, DEFAULT_PINTU, DEFAULT_JENDELA } from '../constants/materials';
 import { calcOpeningsArea } from '../utils/calculator';
 import { MARGIN, MIN_GAP, findFreeOffset } from '../utils/openings';
+import { peringatan } from '../utils/confirm';
 import { wallLength, moveEndAlongDirection, normalizePointsEqual, rectRoomWalls, lShapeRoomWalls, findFreeOrigin, arcLength, sagittaFromRadius, minRadius, effectiveWallLength, distancePointToSegment, distancePointToArc, intersectRayWithCurve, projectPointToCurve, attachedArcForPoint, ARC_ATTACH_TOL, cornerFillet, findSharpCorner, findCornerFillet, lineIntersection } from '../utils/geometry';
 import type { BrickType, MortarRatio, Wall, Opening, Point, Room, Floor } from '../types';
 import { defaultFloor } from '../types';
@@ -175,7 +176,7 @@ interface WallStore {
   flipArc: (id: string) => void;
   roundCorner: (point: Point, radius: number) => { ok: true } | { ok: false; reason: string };
   unroundCorner: () => { ok: true } | { ok: false; reason: string };
-  rapikanSudut: () => number;
+  rapikanSudut: () => { sambungan: number; dihapus: number };
   selectCorner: (p: Point | null) => void;
   clearCornerSelection: () => void;
   cornerPoint: Point | null;
@@ -304,6 +305,9 @@ export const useWallStore = create<WallStore>()(
       if (!w) return;
       const newP2 = moveEndAlongDirection(w.p1, w.p2, m);
       const len = wallLength(w.p1, newP2);
+      if (!w.arc_sagitta_m || Math.abs(w.arc_sagitta_m) < 1e-9) {
+        if (len < 0.1) { peringatan('Dinding terlalu pendek', 'Dinding terlalu pendek (minimal 0,1 m)'); return; }
+      }
       const nextWalls = walls.map((mw) => {
         if (mw.id !== selectedId) return mw;
         const nw = { ...mw, p2: newP2, length_meters: len };
@@ -327,6 +331,10 @@ export const useWallStore = create<WallStore>()(
       if (idx === -1) return;
       const w = walls[idx];
       const newP2 = moveEndAlongDirection(w.p1, w.p2, m);
+      const len = wallLength(w.p1, newP2);
+      if (!w.arc_sagitta_m || Math.abs(w.arc_sagitta_m) < 1e-9) {
+        if (len < 0.1) { peringatan('Dinding terlalu pendek', 'Dinding terlalu pendek (minimal 0,1 m)'); return; }
+      }
       const nextWalls = walls.map((mw, i) => {
         if (i === idx) { const nnw = { ...mw, p2: newP2, length_meters: wallLength(w.p1, newP2) }; return { ...nnw, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) })) }; }
         if (normalizePointsEqual(mw.p1, w.p2)) { const nnw = { ...mw, p1: newP2, length_meters: wallLength(newP2, mw.p2) }; return { ...nnw, openings: (mw.openings ?? []).map((o) => ({ ...o, offset_meters: clampOpeningOffset(nnw, o, o.offset_meters) })) }; }
@@ -340,7 +348,11 @@ export const useWallStore = create<WallStore>()(
       const { walls, selectedId } = get();
       const w = walls.find((x) => x.id === selectedId);
       if (!w) return;
-      const newP2 = moveEndAlongDirection(w.p1, w.p2, Math.max(0.1, w.length_meters + d));
+      const nextLen = w.length_meters + d;
+      if (!w.arc_sagitta_m || Math.abs(w.arc_sagitta_m) < 1e-9) {
+        if (nextLen < 0.1) { peringatan('Dinding terlalu pendek', 'Dinding terlalu pendek (minimal 0,1 m)'); return; }
+      }
+      const newP2 = moveEndAlongDirection(w.p1, w.p2, nextLen);
       const nextWalls = walls.map((mw) =>
         mw.id === selectedId ? { ...mw, p2: newP2, length_meters: wallLength(w.p1, newP2) } : mw,
       );
@@ -409,6 +421,7 @@ export const useWallStore = create<WallStore>()(
       const maxNum = Math.max(...walls.map((w) => { const m = w.name.match(/W-(\d+)/); return m ? parseInt(m[1], 10) : 0; }), 0);
       const newName = `W-${String(maxNum + 1).padStart(2, '0')}`;
       const len = wallLength(p1, p2);
+      if (len < 0.1) return;
       const newWall: Wall = {
         ...active,
         id: `w-${Date.now()}`,
@@ -425,17 +438,27 @@ export const useWallStore = create<WallStore>()(
       // Titik yang menempel di busur tidak boleh lepas: jepit geraknya sepanjang busur.
       const arc = attachedArcForPoint(walls, oldPoint);
       const target = arc ? projectPointToCurve(newPoint, arc.p1, arc.p2, arc.arc_sagitta_m || 0) : newPoint;
+      const touchedIds = new Set<string>();
       const updated = walls.map((w) => {
-        if (normalizePointsEqual(w.p1, oldPoint)) {
+        if (normalizePointsEqual(w.p1, oldPoint)) { touchedIds.add(w.id);
           const nw = { ...w, p1: target, length_meters: 0 };
           return { ...nw, length_meters: effectiveWallLength(nw) };
         }
-        if (normalizePointsEqual(w.p2, oldPoint)) {
+        if (normalizePointsEqual(w.p2, oldPoint)) { touchedIds.add(w.id);
           const nw = { ...w, p2: target, length_meters: 0 };
           return { ...nw, length_meters: effectiveWallLength(nw) };
         }
         return w;
       });
+      // Cegah dinding lurus pendek < 0,1 m
+      for (const uw of updated) {
+        if (touchedIds.has(uw.id) && (!uw.arc_sagitta_m || Math.abs(uw.arc_sagitta_m) < 1e-9)) {
+          if (effectiveWallLength(uw) < 0.1) {
+            peringatan('Dinding terlalu pendek', 'Dinding terlalu pendek (minimal 0,1 m)');
+            return;
+          }
+        }
+      }
       set({ walls: updated, past: [...past, { walls, selectedId }].slice(-50), future: [] });
     },
 
@@ -881,14 +904,23 @@ export const useWallStore = create<WallStore>()(
         if (!changed) break;
       }
 
-      if (movedEnds.size === 0) return 0;
+      // Hapus dinding lurus sangat pendek (< 0,1 m) beserta bukaan di dalamnya
+      let dihapus = 0;
+      const wallsBersih = nextWalls.filter((w) => {
+        if (!!w.arc_sagitta_m && Math.abs(w.arc_sagitta_m) >= 1e-9) return true;
+        if (effectiveWallLength(w) < 0.1) { dihapus++; return false; }
+        return true;
+      });
+      if (dihapus > 0) nextWalls = wallsBersih;
+
+      if (movedEnds.size === 0 && dihapus === 0) return { sambungan: 0, dihapus: 0 };
       set({
         walls: nextWalls,
         past: [...past, { walls, selectedId }].slice(-50),
         future: [],
       });
       syncActiveFloor();
-      return movedEnds.size;
+      return { sambungan: movedEnds.size, dihapus };
     },
   };
 }, {

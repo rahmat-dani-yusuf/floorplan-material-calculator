@@ -15,3 +15,11 @@ export function confirm(title: string, message?: string, onConfirm?: () => void,
     ]);
   }
 }
+
+export function peringatan(title: string, message: string): void {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}: ${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
