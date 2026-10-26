@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { useProjectStore } from '../store/projectStore';
-import { confirm } from '../utils/confirm';
+import { confirm, peringatan } from '../utils/confirm';
 import { useAuthStore } from '../store/authStore';
 import { keluar } from '../services/authService';
 import { useWallStore } from '../store/wallStore';
@@ -34,7 +34,7 @@ export default function ProjectsScreen({ onBack, onSelect }: { onBack: () => voi
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={{ paddingTop: 48, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: '#131b2e' }}>
         <Pressable onPress={onBack}>
-          <Text style={{ color: C.secondary, fontSize: 14 }}>← Kembali</Text>
+          <Text style={{ color: C.secondary, fontSize: 14 }}>â†گ Kembali</Text>
         </Pressable>
         <Text style={{ color: C.text, fontSize: 20, fontWeight: '700', marginTop: 6 }}>Proyek Saya</Text>
         <Text style={{ color: C.secondary, fontSize: 12 }}>Manajemen proyek dinding</Text>
@@ -107,7 +107,7 @@ export default function ProjectsScreen({ onBack, onSelect }: { onBack: () => voi
             <Pressable onPress={() => onSelect(p.id)} style={{ flex: 1 }}>
               <Text style={{ color: C.text, fontSize: 16, fontWeight: '700' }}>{p.name}</Text>
               <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
-                {p.walls.length} dinding • {totalNetArea(p.walls).toFixed(2)} m² netto
+                {p.walls.length} dinding â€¢ {totalNetArea(p.walls).toFixed(2)} mآ² netto
               </Text>
               <Text style={{ color: C.outline, fontSize: 10, marginTop: 2 }}>
                 Diubah {new Date(p.updatedAt).toLocaleDateString('id-ID')}
@@ -124,10 +124,7 @@ export default function ProjectsScreen({ onBack, onSelect }: { onBack: () => voi
               </Pressable>
               <Pressable
                 onPress={() => {
-                  Alert.alert('Hapus Proyek', `Hapus "${p.name}"?`, [
-                    { text: 'Batal', style: 'cancel' },
-                    { text: 'Hapus', onPress: () => deleteProject(p.id), style: 'destructive' },
-                  ]);
+                  confirm('Hapus Proyek', `Hapus "${p.name}"?`, () => deleteProject(p.id));
                 }}
                 style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: '#93000a55' }}
               >
@@ -148,11 +145,11 @@ export default function ProjectsScreen({ onBack, onSelect }: { onBack: () => voi
             setModalVisible(false);
             try {
               saveCurrentAs(nama);
-              Alert.alert('Proyek tersimpan', `"${nama}" disimpan ke lokal.`);
+              peringatan('Proyek tersimpan', `"${nama}" disimpan ke lokal.`);
             } catch (e: any) {
               const code = e?.code || e?.message || e;
               console.log('[Firestore error]', code);
-              Alert.alert('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan proyek.'));
+              peringatan('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan proyek.'));
             }
           }}
           onBatal={() => setModalVisible(false)}

@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View, Platform, Share } from 'react-native';
+﻿import React, { useState } from 'react';
+import { Pressable, ScrollView, Text, View, Platform, Share } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useWallStore } from '../store/wallStore';
 import { usePriceStore } from '../store/priceStore';
 import { useProjectStore } from '../store/projectStore';
 import { buildProjectSummary, buildMultiFloorSummary, formatRupiah } from '../utils/pricing';
+import { peringatan } from '../utils/confirm';
 import { buildMultiFloorRabText, buildMultiFloorRabHtml } from '../utils/exportRab';
 import { BRICK_LABEL } from '../constants/materials';
 import { C } from '../theme';
@@ -36,16 +37,16 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
     <View style={{ flex: 1, backgroundColor: C.bg }}>
       <View style={{ paddingTop: 48, paddingHorizontal: 16, paddingBottom: 12, backgroundColor: '#131b2e' }}>
         <Pressable onPress={onBack}>
-          <Text style={{ color: C.secondary, fontSize: 14 }}>← Kembali ke Editor</Text>
+          <Text style={{ color: C.secondary, fontSize: 14 }}>â†گ Kembali ke Editor</Text>
         </Pressable>
         {onOpenPrices && (
           <Pressable onPress={onOpenPrices} style={{ alignSelf: 'flex-start', marginTop: 4 }}>
-            <Text style={{ color: C.tertiary, fontSize: 13, fontWeight: '600' }}>Pengaturan Harga →</Text>
+            <Text style={{ color: C.tertiary, fontSize: 13, fontWeight: '600' }}>Pengaturan Harga â†’</Text>
           </Pressable>
         )}
         <Text style={{ color: C.text, fontSize: 20, fontWeight: '700', marginTop: 6 }}>Hasil Kalkulasi & RAB</Text>
         <Text style={{ color: C.outline, fontSize: 12 }}>
-          {summary.total_area_m2.toFixed(2)} m² • {walls.length} dinding
+          {summary.total_area_m2.toFixed(2)} mآ² â€¢ {walls.length} dinding
         </Text>
       </View>
 
@@ -55,10 +56,10 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
           <Text style={{ color: C.outline, fontSize: 11 }}>GRAND TOTAL SEMUA LANTAI</Text>
           <Text style={{ color: C.primarySoft, fontSize: 28, fontWeight: '700' }}>{formatRupiah(multi.grand_total)}</Text>
           <Text style={{ color: C.secondary, fontSize: 12, marginTop: 4 }}>
-            Luas netto {multi.total_area_m2.toFixed(2)} m² • {multi.perFloor.length} lantai
+            Luas netto {multi.total_area_m2.toFixed(2)} mآ² â€¢ {multi.perFloor.length} lantai
           </Text>
           <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
-            Lantai aktif: {summary.total_area_m2.toFixed(2)} m² • {walls.length} dinding ({formatRupiah(summary.grand_total)})
+            Lantai aktif: {summary.total_area_m2.toFixed(2)} mآ² â€¢ {walls.length} dinding ({formatRupiah(summary.grand_total)})
           </Text>
           <Text style={{ color: C.secondary, fontSize: 11, marginTop: 2 }}>
             Harga mengikuti Pengaturan Harga
@@ -75,10 +76,10 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
               <Pressable onPress={() => setOpenFloor((prev) => ({ ...prev, [f.floorId]: !prev[f.floorId] }))} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <View>
                   <Text style={{ color: C.text, fontWeight: '700', fontSize: 14 }}>
-                    {f.floorName}{isActive ? ' (aktif)' : ''} • {f.wallCount} dinding
+                    {f.floorName}{isActive ? ' (aktif)' : ''} â€¢ {f.wallCount} dinding
                   </Text>
                   <Text style={{ color: C.secondary, fontSize: 11 }}>
-                    {f.summary.total_area_m2.toFixed(2)} m² netto
+                    {f.summary.total_area_m2.toFixed(2)} mآ² netto
                   </Text>
                 </View>
                 <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>{formatRupiah(f.summary.grand_total)}</Text>
@@ -88,7 +89,7 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
                   {f.summary.line_items.map((item) => (
                     <View key={item.name} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
                       <Text style={{ color: C.text, fontSize: 12 }}>{item.name}</Text>
-                      <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} → {formatRupiah(item.subtotal)}</Text>
+                      <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} â†’ {formatRupiah(item.subtotal)}</Text>
                     </View>
                   ))}
                 </View>
@@ -101,7 +102,15 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
           <Pressable
             onPress={() => {
               if (Platform.OS === 'web') {
-                Alert.alert('Fitur ini hanya tersedia di HP');
+                const text = buildMultiFloorRabText(projectName, multi);
+                const nav = navigator as any;
+                if (nav.share) {
+                  nav.share({ title: 'RAB ' + projectName, text }).catch(() => {});
+                } else if (nav.clipboard) {
+                  nav.clipboard.writeText(text).then(() => peringatan('RAB disalin ke clipboard', ''));
+                } else {
+                  peringatan('Bagikan tidak tersedia', '');
+                }
                 return;
               }
               const text = buildMultiFloorRabText(projectName, multi);
@@ -114,7 +123,23 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
           <Pressable
             onPress={async () => {
               if (Platform.OS === 'web') {
-                Alert.alert('Fitur ini hanya tersedia di HP');
+                setPreparing(true);
+                try {
+                  const html = buildMultiFloorRabHtml(projectName, multi);
+                  const win = (window as any).open('', '_blank');
+                  if (!win) {
+                    peringatan('Gagal membuka jendela', '');
+                    setPreparing(false);
+                    return;
+                  }
+                  win.document.write(html);
+                  win.document.close();
+                  win.print();
+                } catch (e) {
+                  peringatan('Gagal membuat PDF', 'Coba lagi.');
+                } finally {
+                  setPreparing(false);
+                }
                 return;
               }
               try {
@@ -123,12 +148,12 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
                 const { uri } = await Print.printToFileAsync({ html });
                 const available = await Sharing.isAvailableAsync();
                 if (!available) {
-                  Alert.alert('Tidak bisa membagikan', 'Fitur berbagi tidak tersedia di perangkat ini.');
+                  peringatan('Tidak bisa membagikan', 'Fitur berbagi tidak tersedia di perangkat ini.');
                   return;
                 }
                 await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Bagikan RAB PDF' });
               } catch (e) {
-                Alert.alert('Gagal membuat PDF', 'Coba lagi.');
+                peringatan('Gagal membuat PDF', 'Coba lagi.');
               } finally {
                 setPreparing(false);
               }
@@ -168,19 +193,19 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
                   {cs.wall.name}
                 </Text>
                 <Text style={{ color: C.secondary, fontSize: 11 }}>
-                  {cs.wall.length_meters.toFixed(2)} × {cs.wall.height_meters.toFixed(2)} m • {BRICK_LABEL[cs.wall.brick_type]} • Adukan {cs.wall.mortar_ratio}
+                  {cs.wall.length_meters.toFixed(2)} أ— {cs.wall.height_meters.toFixed(2)} m â€¢ {BRICK_LABEL[cs.wall.brick_type]} â€¢ Adukan {cs.wall.mortar_ratio}
                 </Text>
               </View>
               <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>{formatRupiah(cs.grand_total)}</Text>
             </Pressable>
             {open[cs.wall.id] && (
               <View style={{ marginTop: 8, gap: 4 }}>
-                <Text style={{ color: C.secondary, fontSize: 11 }}>Luas kotor {cs.quantities.gross_area_m2.toFixed(2)} m² − bukaan {cs.quantities.openings_area_m2.toFixed(2)} m² = netto {cs.quantities.area_m2.toFixed(2)} m²</Text>
+                <Text style={{ color: C.secondary, fontSize: 11 }}>Luas kotor {cs.quantities.gross_area_m2.toFixed(2)} mآ² âˆ’ bukaan {cs.quantities.openings_area_m2.toFixed(2)} mآ² = netto {cs.quantities.area_m2.toFixed(2)} mآ²</Text>
                 <Text style={{ color: C.text, fontWeight: '600' }}>{cs.line_items.length} item</Text>
                 {cs.line_items.map((item) => (
                   <View key={item.name} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
                     <Text style={{ color: C.text, fontSize: 12 }}>{item.name}</Text>
-                    <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} → {formatRupiah(item.subtotal)}</Text>
+                    <Text style={{ color: C.text, fontSize: 12 }}>{item.quantity} {item.unit} â†’ {formatRupiah(item.subtotal)}</Text>
                   </View>
                 ))}
               </View>
@@ -191,3 +216,5 @@ export default function ResultScreen({ onBack, onOpenPrices, onOpenProjects }: {
     </View>
   );
 }
+
+

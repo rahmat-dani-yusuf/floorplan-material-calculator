@@ -1,10 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { PanResponder, View, Alert, Platform, Pressable, Text as RNText, useWindowDimensions } from 'react-native';
+import { PanResponder, View, Platform, Pressable, Text as RNText, useWindowDimensions } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SVGText, Rect } from 'react-native-svg';
 import { useWallStore, selectActiveWall, selectFloorBelow } from '../store/wallStore';
 import { C } from '../theme';
 import { openingGeometry } from '../utils/openings';
 import { snapToGrid, snapOrthogonal, distancePointToSegment, distancePointToArc, wallLength, effectiveWallLength, nearestPoint, normalizePointsEqual, distance, arcApex, arcPath, arcSegmentPath, doorLeafPath, attachedArcForPoint, projectPointToCurve } from '../utils/geometry';
+import { confirm } from '../utils/confirm';
 import type { Point } from '../types';
 
 const GRID_STEP = 1;
@@ -426,10 +427,7 @@ export default function PlanCanvas({ fitTrigger = 0, isFullscreen = false, onTog
         const wpt = toWorld(e.nativeEvent.locationX, e.nativeEvent.locationY);
         for (const w of wallsRef.current) {
           if ((w.arc_sagitta_m ? distancePointToArc(wpt, w.p1, w.p2, w.arc_sagitta_m) : distancePointToSegment(wpt, w.p1, w.p2)) < 0.35) {
-            Alert.alert('Hapus dinding', `Hapus ${w.name}?`, [
-              { text: 'Batal', style: 'cancel' },
-              { text: 'Hapus', onPress: () => removeWall(w.id), style: 'destructive' },
-            ]);
+            confirm('Hapus dinding', `Hapus ${w.name}?`, () => removeWall(w.id));
             break;
           }
         }

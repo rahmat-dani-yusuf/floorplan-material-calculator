@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, Pressable, ScrollView, TextInput, Alert,
+  View, Text, Pressable, ScrollView, TextInput,
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { useAuthStore } from '../store/authStore';
+import { peringatan } from '../utils/confirm';
 import { usePriceStore } from '../store/priceStore';
 import { fetchMarketPrices, fetchPricesMeta, saveMarketPrices } from '../services/priceCloud';
 import { C } from '../theme';
@@ -104,7 +105,7 @@ export default function AdminPriceScreen({ onBack }: { onBack: () => void }) {
 
   const handleSave = async () => {
     if (!uid) {
-      Alert.alert('Gagal', 'Sesi tidak valid. Silakan login ulang.');
+      peringatan('Gagal', 'Sesi tidak valid. Silakan login ulang.');
       return;
     }
     const prices: UnitPrices = {
@@ -123,11 +124,11 @@ export default function AdminPriceScreen({ onBack }: { onBack: () => void }) {
       await saveMarketPrices(prices, uid);
       setUpdatedAt(Date.now());
       pakaiHargaPasar();
-      Alert.alert('Tersimpan', 'Harga pasar berhasil disimpan ke cloud.');
+      peringatan('Tersimpan', 'Harga pasar berhasil disimpan ke cloud.');
     } catch (e: any) {
       const code = e?.code || e?.message || e;
       console.warn('[adminPrice] gagal simpan', code);
-      Alert.alert('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan harga.'));
+      peringatan('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan harga.'));
     } finally {
       setSaving(false);
     }

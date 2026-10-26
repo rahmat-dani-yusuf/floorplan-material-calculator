@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import {
-  View, Text, Pressable, ScrollView, TextInput, Alert,
+  View, Text, Pressable, ScrollView, TextInput,
   KeyboardAvoidingView, Platform, StyleSheet,
 } from 'react-native';
 import { usePriceStore } from '../store/priceStore';
+import { confirm, peringatan } from '../utils/confirm';
 import { useAuthStore } from '../store/authStore';
 import { DEFAULT_PRICES } from '../constants/materials';
 import { C } from '../theme';
@@ -58,9 +59,7 @@ export default function PriceSettingsScreen({ onBack, onBackFrom, onOpenAdmin }:
   ];
 
   const confirmReset = () => {
-    Alert.alert('Konfirmasi', 'Kembalikan harga ke bawaan?', [
-      { text: 'Batal', style: 'cancel' },
-      { text: 'Ya', onPress: () => {
+    confirm('Konfirmasi', 'Kembalikan harga ke bawaan?', () => {
         resetPrices();
         setRaw({
           bata_merah: String(DEFAULT_PRICES.bata.bata_merah),
@@ -71,8 +70,8 @@ export default function PriceSettingsScreen({ onBack, onBackFrom, onOpenAdmin }:
           cat_dasar_liter: String(DEFAULT_PRICES.cat_dasar_liter),
           cat_penutup_liter: String(DEFAULT_PRICES.cat_penutup_liter),
         });
-      } },
-    ]);
+      });
+
   };
 
   const handlePakaiPasar = async () => {
@@ -92,7 +91,7 @@ export default function PriceSettingsScreen({ onBack, onBackFrom, onOpenAdmin }:
         };
       });
     } catch (e: any) {
-      Alert.alert('Gagal', 'Tidak dapat mengambil harga pasar saat ini.');
+      peringatan('Gagal', 'Tidak dapat mengambil harga pasar saat ini.');
     }
   };
 

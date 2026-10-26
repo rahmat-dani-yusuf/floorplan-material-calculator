@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, Pressable, Alert, KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator, Animated, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Text, TextInput, Pressable, KeyboardAvoidingView, ScrollView, Platform, ActivityIndicator, Animated, StyleSheet, useWindowDimensions } from 'react-native';
 import LoginMascot from '../components/LoginMascot';
+import { peringatan } from '../utils/confirm';
 import { masuk, daftar, lupaSandi } from '../services/authService';
 import { C } from '../theme';
 
@@ -24,7 +25,7 @@ export default function LoginScreen({ onLogin, onGuest }: { onLogin: (name: stri
   }, []);
 
   const handleLogin = () => {
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || password.length < 4) { Alert.alert('Validasi', 'Masukkan email yang valid dan kata sandi minimal 4 karakter'); return; }
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || password.length < 4) { peringatan('Validasi', 'Masukkan email yang valid dan kata sandi minimal 4 karakter'); return; }
     setMsg('');
     setMsgType(null);
     setLoading(true);
@@ -37,7 +38,7 @@ export default function LoginScreen({ onLogin, onGuest }: { onLogin: (name: stri
 
   const handleDaftar = () => {
     if (!nameReg.trim() || !email.trim() || password.length < 6 || password !== confirmPass) {
-      Alert.alert('Validasi', 'Isi semua, sandi min 6, dan ulangi sama');
+      peringatan('Validasi', 'Isi semua, sandi min 6, dan ulangi sama');
       return;
     }
     setLoading(true);
@@ -49,8 +50,8 @@ export default function LoginScreen({ onLogin, onGuest }: { onLogin: (name: stri
   };
 
   const handleReset = () => {
-    if (email.trim()) { lupaSandi(email.trim()).then((r) => Alert.alert(r.ok ? 'Berhasil' : 'Gagal', r.msg || '')); }
-    else { Alert.alert('Email diperlukan', 'Masukkan email untuk reset'); }
+    if (email.trim()) { lupaSandi(email.trim()).then((r) => peringatan(r.ok ? 'Berhasil' : 'Gagal', r.msg || '')); }
+    else { peringatan('Email diperlukan', 'Masukkan email untuk reset'); }
   };
 
   const handleTogglePass = () => setShowPass((p) => !p);

@@ -1,11 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Alert, Modal, PanResponder, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
+﻿import React, { useMemo, useRef, useState } from 'react';
+import { Modal, PanResponder, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import PlanCanvas from '../components/PlanCanvas';
 import Stepper from '../components/Stepper';
 import ChipGroup from '../components/ChipGroup';
 import { useWallStore, selectActiveWall } from '../store/wallStore';
 import { useProjectStore } from '../store/projectStore';
 import { confirm } from '../utils/confirm';
+import { peringatan } from '../utils/confirm';
 import { useAuthStore } from '../store/authStore';
 import { keluar } from '../services/authService';
 import { BRICK_LABEL, DEFAULT_PINTU, DEFAULT_JENDELA, OPENING_LIMITS } from '../constants/materials';
@@ -76,9 +77,9 @@ function ArcSlider({ sagitta, maxSag, onSlide }: { sagitta: number; maxSag: numb
       </View>
       <View style={{ position: 'absolute', left: `${t * 100}%`, top: 22, width: 28, height: 28, marginLeft: -14, marginTop: -14, borderRadius: 14, backgroundColor: C.primary, borderWidth: 2, borderColor: '#fff' }} />
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
-        <Text style={{ color: C.outline, fontSize: 10 }}>◀ kiri</Text>
+        <Text style={{ color: C.outline, fontSize: 10 }}>â—€ kiri</Text>
         <Text style={{ color: C.outline, fontSize: 10 }}>lurus</Text>
-        <Text style={{ color: C.outline, fontSize: 10 }}>kanan ▶</Text>
+        <Text style={{ color: C.outline, fontSize: 10 }}>kanan â–¶</Text>
       </View>
     </View>
   );
@@ -101,6 +102,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const [roomPreset, setRoomPreset] = useState('kamar');
   const [roomCustomW, setRoomCustomW] = useState('3');
   const [roomCustomL, setRoomCustomL] = useState('3');
+  const [roomRotated, setRoomRotated] = useState(false);
   const [roomSide, setRoomSide] = useState<'luar' | 'dalam'>('luar');
   const [roomDoor, setRoomDoor] = useState(true);
   const [roomOffset, setRoomOffset] = useState('0');
@@ -111,7 +113,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelH, setPanelH] = useState<number | null>(null); // tinggi panel bawah (px); null = default flex
   const { height: winH } = useWindowDimensions();
-  // Tinggi TERUKUR panel (layout aktual), bukan nilai state — state bisa null
+  // Tinggi TERUKUR panel (layout aktual), bukan nilai state â€” state bisa null
   // (default flex) sehingga membaca state saat grant memberi 320 yang salah.
   const panelMeasuredHRef = useRef(320);
   // Tinggi awal gesture: diisi saat grant, dibaca saat move (tidak dari state).
@@ -322,7 +324,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* header — disembunyikan saat mode penuh */}
+      {/* header â€” disembunyikan saat mode penuh */}
       {!isFullscreen && (
       <View style={{ paddingTop: 48, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: '#131b2e' }}>
         <Text style={{ color: C.text, fontSize: 18, fontWeight: '600' }}>Edit Dinding</Text>
@@ -340,15 +342,15 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
         }} style={{ position: 'absolute', right: 16, top: 48, padding: 6 }}>
           <Text style={{ color: C.error, fontSize: 12, fontWeight: '600' }}>Keluar</Text>
         </Pressable>
-        <Text style={{ color: C.secondary, fontSize: 12 }}>Geser titik oranye untuk ubah panjang • Ketuk dinding untuk memilih</Text>
+        <Text style={{ color: C.secondary, fontSize: 12 }}>Geser titik oranye untuk ubah panjang â€¢ Ketuk dinding untuk memilih</Text>
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-          {tool('↶ Undo', s.undo, s.past.length > 0)}
-          {tool('↷ Redo', s.redo, s.future.length > 0)}
+          {tool('â†¶ Undo', s.undo, s.past.length > 0)}
+          {tool('â†· Redo', s.redo, s.future.length > 0)}
           {tool('Reset', () => confirm('Reset Denah', 'Semua dinding akan dikembalikan ke kondisi awal?', () => s.reset()), true, true)}
           {tool('Rapikan Sudut', () => {
             const r = s.rapikanSudut();
             const ada = r.sambungan > 0 || r.dihapus > 0;
-            Alert.alert('Rapikan Sudut', ada ? `${r.sambungan} sambungan dirapikan, ${r.dihapus} dinding sangat pendek dihapus` : 'Sudah rapi');
+            peringatan('Rapikan Sudut', ada ? `${r.sambungan} sambungan dirapikan, ${r.dihapus} dinding sangat pendek dihapus` : 'Sudah rapi');
           }, true)}
           {onOpenPrices ? tool('Harga', onOpenPrices, true) : null}
           {onOpenProjects ? tool('Proyek', onOpenProjects, true) : null}
@@ -369,7 +371,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
         )}
       </View>
 
-      {/* panel parameter — disembunyikan saat mode penuh */}
+      {/* panel parameter â€” disembunyikan saat mode penuh */}
       {!isFullscreen && (
       <>
       {/* handle seret tepi atas panel: mengubah tinggi kanvas vs panel.
@@ -415,14 +417,14 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
       >
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 4 }}>
           <Text style={{ color: C.secondary, fontSize: 11 }}>{summary.count} dinding</Text>
-          <Text style={{ color: C.secondary, fontSize: 11 }}>• Total panjang {summary.total.toFixed(2)} m</Text>
-          <Text style={{ color: C.secondary, fontSize: 11 }}>• Luas kotor {summary.gross.toFixed(2)} m²</Text>
+          <Text style={{ color: C.secondary, fontSize: 11 }}>â€¢ Total panjang {summary.total.toFixed(2)} m</Text>
+          <Text style={{ color: C.secondary, fontSize: 11 }}>â€¢ Luas kotor {summary.gross.toFixed(2)} mآ²</Text>
         </View>
 
         <Pressable onPress={() => {
           const sel = walls.find((w) => w.id === selectedId);
           if (!sel) {
-            Alert.alert('Ketuk dinding dulu', 'Ketuk dinding dulu untuk menempelkan ruangan');
+            peringatan('Ketuk dinding dulu', 'Ketuk dinding dulu untuk menempelkan ruangan');
             return;
           }
           setRoomModal(true);
@@ -471,7 +473,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
             onPress={() => setCopyFromBelow((v) => !v)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8, marginTop: 6 }}
           >
-            <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: copyFromBelow ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{copyFromBelow && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+            <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: copyFromBelow ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{copyFromBelow && <Text style={{ color: '#fff', fontSize: 10 }}>âœ“</Text>}</View>
             <Text style={{ color: C.text, fontSize: 11 }}>Salin dari lantai bawah saat tambah lantai</Text>
           </Pressable>
         </View>
@@ -533,7 +535,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
               }}
               style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
             >
-              <Text style={{ color: C.text }}>−</Text>
+              <Text style={{ color: C.text }}>âˆ’</Text>
             </Pressable>
             <TextInput
               value={cornerRadiusText}
@@ -557,11 +559,11 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
             <Pressable
               onPress={() => {
-                if (!cornerPoint) { Alert.alert('Belum ada sudut', 'Ketuk titik sudut di kanvas pada mode Pilih.'); return; }
+                if (!cornerPoint) { peringatan('Belum ada sudut', 'Ketuk titik sudut di kanvas pada mode Pilih.'); return; }
                 const r = parseFloat((cornerRadiusText || '0').replace(',', '.'));
-                if (!(r > 0)) { Alert.alert('Radius tidak valid', 'Masukkan radius lebih dari 0, contoh 0,3.'); return; }
+                if (!(r > 0)) { peringatan('Radius tidak valid', 'Masukkan radius lebih dari 0, contoh 0,3.'); return; }
                 const res = s.roundCorner(cornerPoint, r);
-                if (!res.ok) Alert.alert('Tidak bisa dibulatkan', res.reason);
+                if (!res.ok) peringatan('Tidak bisa dibulatkan', res.reason);
               }}
               style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: C.primary, alignItems: 'center' }}
             >
@@ -570,7 +572,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
             <Pressable
               onPress={() => {
                 const res = s.unroundCorner();
-                if (!res.ok) Alert.alert('Tidak bisa diluruskan', res.reason);
+                if (!res.ok) peringatan('Tidak bisa diluruskan', res.reason);
               }}
               style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
             >
@@ -609,20 +611,20 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
               </View>
               {curved && (
                 <>
-                  <Text style={{ color: C.textDim, fontSize: 11, marginTop: 6 }}>Radius (m) • min {minR.toFixed(2)} m • tali {chord.toFixed(2)} m</Text>
+                  <Text style={{ color: C.textDim, fontSize: 11, marginTop: 6 }}>Radius (m) â€¢ min {minR.toFixed(2)} m â€¢ tali {chord.toFixed(2)} m</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
                     <Pressable
                       onPress={() => {
                         const cur = arcRadiusText !== '' ? parseFloat(arcRadiusText.replace(',', '.')) : curR;
                         const next = (Number.isFinite(cur) ? cur : minR) - 0.1;
                         const r = Math.round(next * 100) / 100;
-                        if (!(r >= minR - 1e-9)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
-                        if (!s.setArcRadius(wall.id, r)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!(r >= minR - 1e-9)) { peringatan('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!s.setArcRadius(wall.id, r)) { peringatan('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
                         setArcRadiusText(String(r));
                       }}
                       style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
                     >
-                      <Text style={{ color: C.text }}>−</Text>
+                      <Text style={{ color: C.text }}>âˆ’</Text>
                     </Pressable>
                     <TextInput
                       value={shownR}
@@ -630,9 +632,9 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                       onBlur={() => {
                         if (arcRadiusText === '') return;
                         const r = parseFloat(arcRadiusText.replace(',', '.'));
-                        if (!Number.isFinite(r)) { Alert.alert('Radius tidak valid', 'Masukkan angka, contoh 2.5.'); return; }
-                        if (!(r >= minR - 1e-9)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
-                        if (!s.setArcRadius(wall.id, r)) Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`);
+                        if (!Number.isFinite(r)) { peringatan('Radius tidak valid', 'Masukkan angka, contoh 2.5.'); return; }
+                        if (!(r >= minR - 1e-9)) { peringatan('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!s.setArcRadius(wall.id, r)) peringatan('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`);
                       }}
                       keyboardType="decimal-pad"
                       placeholder={minR.toFixed(2)}
@@ -644,7 +646,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                         const cur = arcRadiusText !== '' ? parseFloat(arcRadiusText.replace(',', '.')) : curR;
                         const next = (Number.isFinite(cur) ? cur : minR) + 0.1;
                         const r = Math.round(next * 100) / 100;
-                        if (!s.setArcRadius(wall.id, r)) { Alert.alert('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
+                        if (!s.setArcRadius(wall.id, r)) { peringatan('Radius terlalu kecil', `Radius minimum ${minR.toFixed(2)} m.`); return; }
                         setArcRadiusText(String(r));
                       }}
                       style={{ padding: 8, backgroundColor: C.surfaceHighest, borderRadius: 6 }}
@@ -671,7 +673,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                           />
                         </View>
                         <Text style={{ color: C.text, fontSize: 11, width: 118, textAlign: 'right' }}>
-                          {Math.abs(sag) < 0.05 || !Number.isFinite(curR) ? 'Lurus' : `R = ${curR.toFixed(2)} m · busur ${wall.length_meters.toFixed(2)} m`}
+                          {Math.abs(sag) < 0.05 || !Number.isFinite(curR) ? 'Lurus' : `R = ${curR.toFixed(2)} m آ· busur ${wall.length_meters.toFixed(2)} m`}
                         </Text>
                       </View>
                     </View>
@@ -699,7 +701,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 }
                 setWarn('');
                 const ok = s.addOpening(wall.id, 'pintu');
-                if (!ok) Alert.alert('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
+                if (!ok) peringatan('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
               }}
               style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
             >
@@ -717,7 +719,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 }
                 setWarn('');
                 const ok = s.addOpening(wall.id, 'jendela');
-                if (!ok) Alert.alert('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
+                if (!ok) peringatan('Tidak ada ruang kosong', 'Tidak cukup ruang pada dinding ini');
               }}
               style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.surfaceHighest, alignItems: 'center' }}
             >
@@ -737,7 +739,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: C.textDim, fontSize: 10 }}>Lebar (m)</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { width_meters: Math.round(Math.max(OPENING_LIMITS.min, o.width_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { width_meters: Math.round(Math.max(OPENING_LIMITS.min, o.width_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>âˆ’</Text></Pressable>
                     <Text style={{ color: C.text, fontWeight: '700' }}>{o.width_meters.toFixed(1)}</Text>
                     <Pressable onPress={() => s.updateOpening(wall.id, o.id, { width_meters: Math.round(Math.min(OPENING_LIMITS.max, o.width_meters + 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
                   </View>
@@ -745,7 +747,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: C.textDim, fontSize: 10 }}>Tinggi (m)</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { height_meters: Math.round(Math.max(OPENING_LIMITS.min, o.height_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Pressable onPress={() => s.updateOpening(wall.id, o.id, { height_meters: Math.round(Math.max(OPENING_LIMITS.min, o.height_meters - 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>âˆ’</Text></Pressable>
                     <Text style={{ color: C.text, fontWeight: '700' }}>{o.height_meters.toFixed(1)}</Text>
                     <Pressable onPress={() => s.updateOpening(wall.id, o.id, { height_meters: Math.round(Math.min(OPENING_LIMITS.max, o.height_meters + 0.1) * 10) / 10 })} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
                   </View>
@@ -753,7 +755,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: C.textDim, fontSize: 10 }}>Posisi (m)</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.max(MARGIN + o.width_meters / 2, (o.offset_meters || 0) - 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>−</Text></Pressable>
+                    <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.max(MARGIN + o.width_meters / 2, (o.offset_meters || 0) - 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>âˆ’</Text></Pressable>
                     <Text style={{ color: C.text, fontWeight: '700' }}>{(o.offset_meters || 0).toFixed(2)}</Text>
                     <Pressable onPress={() => s.moveOpening(wall.id, o.id, Math.round(Math.min(effectiveWallLength(wall) - MARGIN - o.width_meters / 2, (o.offset_meters || 0) + 0.05) * 20) / 20)} style={{ padding: 4, backgroundColor: C.surfaceHighest, borderRadius: 6 }}><Text style={{ color: C.text }}>+</Text></Pressable>
                   </View>
@@ -770,7 +772,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           {/* ringkasan luas */}
           <View style={{ backgroundColor: C.surface, borderRadius: 10, padding: 10, marginTop: 6 }}>
             <Text style={{ color: C.text, fontSize: 12, fontWeight: '600' }}>
-              Luas kotor {wallSummary.gross.toFixed(2)} m² − bukaan {wallSummary.open.toFixed(2)} m² = netto {wallSummary.net.toFixed(2)} m²
+              Luas kotor {wallSummary.gross.toFixed(2)} mآ² âˆ’ bukaan {wallSummary.open.toFixed(2)} mآ² = netto {wallSummary.net.toFixed(2)} mآ²
             </Text>
           </View>
 
@@ -785,7 +787,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
           onPress={onCalculate}
           style={{ backgroundColor: C.primary, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 4 }}
         >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Hitung Material & RAB →</Text>
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Hitung Material & RAB â†’</Text>
         </Pressable>
       </ScrollView>
       </>
@@ -799,14 +801,14 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
               <Text style={{ color: C.error }}>Ketuk dinding dulu untuk menempelkan ruangan</Text>
             ) : (
               <>
-                <Text style={{ color: C.secondary, fontSize: 12 }}>Dinding terpilih: {wall?.name || '—'}</Text>
+                <Text style={{ color: C.secondary, fontSize: 12 }}>Dinding terpilih: {wall?.name || 'â€”'}</Text>
                 <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
                   {[
-                    { key: 'kamar', label: 'Kamar Tidur 3×3' },
-                    { key: 'mandi', label: 'Kamar Mandi 2×2' },
-                    { key: 'dapur', label: 'Dapur 3×3' },
-                    { key: 'tamu', label: 'Ruang Tamu 4×3' },
-                    { key: 'garasi', label: 'Garasi 3×6' },
+                    { key: 'kamar', label: 'Kamar Tidur 3أ—3' },
+                    { key: 'mandi', label: 'Kamar Mandi 2أ—2' },
+                    { key: 'dapur', label: 'Dapur 3أ—3' },
+                    { key: 'tamu', label: 'Ruang Tamu 4أ—3' },
+                    { key: 'garasi', label: 'Garasi 3أ—6' },
                     { key: 'custom', label: 'Kustom' },
                   ].map((opt) => (
                     <Pressable key={opt.key} onPress={() => setRoomPreset(opt.key)} style={{ padding: 6, borderRadius: 8, backgroundColor: roomPreset === opt.key ? C.primary : C.surfaceHighest, flex: 1 }}>
@@ -831,6 +833,7 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                   <Pressable onPress={() => setRoomSide('luar')} style={{ padding: 6, borderRadius: 6, backgroundColor: roomSide === 'luar' ? C.primary : C.surfaceHighest, flex: 1 }}><Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>{roomSide === 'luar' ? 'Luar' : 'Luar'}</Text></Pressable>
                   <Pressable onPress={() => setRoomSide('dalam')} style={{ padding: 6, borderRadius: 6, backgroundColor: roomSide === 'dalam' ? C.primary : C.surfaceHighest, flex: 1 }}><Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>{roomSide === 'dalam' ? 'Dalam' : 'Dalam'}</Text></Pressable>
                   <Pressable onPress={() => setRoomSide(roomSide === 'luar' ? 'dalam' : 'luar')} style={{ padding: 6, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 11 }}>Balik Sisi</Text></Pressable>
+                  <Pressable onPress={() => setRoomRotated((v) => !v)} style={{ padding: 6, borderRadius: 6, backgroundColor: roomRotated ? C.primary : C.surfaceHighest }}><Text style={{ color: '#fff', fontSize: 11, textAlign: 'center' }}>{roomRotated ? 'Diputar' : 'Putar 90°'}</Text></Pressable>
                 </View>
                 <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 4 }}>
                   <Text style={{ color: C.secondary, fontSize: 10 }}>Geser (m):</Text>
@@ -840,11 +843,11 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                   <Pressable onPress={() => { const wlen = (wall ? Math.hypot(wall.p2.x - wall.p1.x, wall.p2.y - wall.p1.y) : 0); const shared = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3); const end = Math.max(0, wlen - shared); setRoomOffset(String(Math.round(end * 100) / 100)); }} style={{ padding: 4, borderRadius: 6, backgroundColor: C.surfaceHighest }}><Text style={{ color: C.text, fontSize: 10 }}>Akhir</Text></Pressable>
                 </View>
                 <Pressable onPress={() => { if (roomPreset !== 'custom') setSamakanPanjang(false); else setSamakanPanjang(v => !v); }} disabled={roomPreset !== 'custom'} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8, opacity: roomPreset === 'custom' ? 1 : 0.6 }}>
-                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: samakanPanjang ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{samakanPanjang && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: samakanPanjang ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{samakanPanjang && <Text style={{ color: '#fff', fontSize: 10 }}>âœ“</Text>}</View>
                   <Text style={{ color: C.text, fontSize: 11 }}>{roomPreset === 'custom' ? 'Samakan dengan panjang dinding' : 'Samakan (hanya Kustom)'}</Text>
                 </Pressable>
                 <Pressable onPress={() => setRoomDoor((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 6, backgroundColor: C.surfaceHighest, borderRadius: 8 }}>
-                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: roomDoor ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{roomDoor && <Text style={{ color: '#fff', fontSize: 10 }}>✓</Text>}</View>
+                  <View style={{ width: 18, height: 18, borderRadius: 4, borderWidth: 2, borderColor: C.primary, backgroundColor: roomDoor ? C.primary : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{roomDoor && <Text style={{ color: '#fff', fontSize: 10 }}>âœ“</Text>}</View>
                   <Text style={{ color: C.text, fontSize: 11 }}>Beri pintu di dinding bersama</Text>
                 </Pressable>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
@@ -853,21 +856,27 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                   </Pressable>
                   <Pressable onPress={() => {
                     const w = wall;
-                    if (!w) { Alert.alert('Pilih dinding', 'Pilih dinding terlebih dahulu'); return; }
-                    let depth = 3;
-                    if (roomPreset === 'kamar') depth = 3;
-                    else if (roomPreset === 'mandi') depth = 2;
-                    else if (roomPreset === 'dapur') depth = 3;
-                    else if (roomPreset === 'tamu') depth = 3;
-                    else if (roomPreset === 'garasi') depth = 6;
-                    else if (roomPreset === 'custom') depth = parseFloat(roomCustomL) || 3;
+                    if (!w) { peringatan('Pilih dinding', 'Pilih dinding terlebih dahulu'); return; }
+                    let depthBase = 3;
+                    if (roomPreset === 'kamar') depthBase = 3;
+                    else if (roomPreset === 'mandi') depthBase = 2;
+                    else if (roomPreset === 'dapur') depthBase = 3;
+                    else if (roomPreset === 'tamu') depthBase = 3;
+                    else if (roomPreset === 'garasi') depthBase = 6;
+                    else if (roomPreset === 'custom') depthBase = parseFloat(roomCustomL) || 3;
                     const wlen = Math.hypot(w.p2.x - w.p1.x, w.p2.y - w.p1.y) || 1;
                     let sharedLen = samakanPanjang ? wlen : (roomPreset === 'kamar' ? 3 : roomPreset === 'mandi' ? 2 : roomPreset === 'dapur' ? 3 : roomPreset === 'tamu' ? 3 : roomPreset === 'garasi' ? 6 : parseFloat(roomCustomW) || 3);
+                    let depth = depthBase;
+                    // Putar 90° menukar sisi tempel (sharedLen) dan sisi dalam (depth),
+                    // mis. Garasi 6×3 bisa menempel dengan sisi 3 m ke dinding pendek.
+                    if (roomRotated) {
+                      const t = sharedLen; sharedLen = depth; depth = t;
+                    }
                     const EPS = 0.01;
                     const offset = parseFloat(roomOffset) || 0;
                     // Samakan toleransi (EPS): bila lebar ruangan hanya sedikit melebihi panjang
-                    // dinding (dalam EPS), clamp ke panjang dinding alih-alih menolak — mis.
-                    // ruangan 8×5 pas di dinding 8 m yang karena pembulatan terbaca 7.999 m.
+                    // dinding (dalam EPS), clamp ke panjang dinding alih-alih menolak â€” mis.
+                    // ruangan 8أ—5 pas di dinding 8 m yang karena pembulatan terbaca 7.999 m.
                     if (sharedLen > wlen && sharedLen <= wlen + EPS) {
                       console.log('[tambahRuangan] clamp sharedLen ke wlen', { wall: w.name, from: sharedLen, to: wlen });
                       sharedLen = wlen;
@@ -877,14 +886,14 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
                     // Penolakan: ruangan melewati ujung dinding atau offset geser terlalu negatif (toleransi EPS).
                     if (offset < -EPS || offset + sharedLen > wlen + EPS) {
                       console.log('[tambahRuangan] DITOLAK: melewati ujung dinding', { wall: w.name, wlen, sharedLen, offset, EPS });
-                      Alert.alert('Posisi tidak valid', `Ruangan (${lebarTxt} m) melewati ujung dinding ${w.name} (${dindingTxt} m). Kurangi lebar atau geser posisi.`);
+                      peringatan('Posisi tidak valid', `Ruangan (${lebarTxt} m) melewati ujung dinding ${w.name} (${dindingTxt} m). Coba Putar 90° atau pilih dinding lebih panjang.`);
                       return;
                     }
                     // Offset geser negatif kecil (dalam EPS): clamp ke 0 alih-alih menolak.
                     if (offset < 0) {
                       console.log('[tambahRuangan] clamp offset ke 0', { wall: w.name, offset });
                       setRoomOffset('0');
-                      Alert.alert('Posisi tidak valid', `Offset geser tidak boleh negatif. Diatur ke 0 untuk dinding ${w.name}.`);
+                      peringatan('Posisi tidak valid', `Offset geser tidak boleh negatif. Diatur ke 0 untuk dinding ${w.name}.`);
                       return;
                     }
                     const dx = w.p2.x - w.p1.x;
@@ -945,11 +954,11 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
             setModalVisible(false);
             try {
               saveCurrentAs(nama);
-              Alert.alert('Proyek tersimpan', `"${nama}" disimpan.`);
+              peringatan('Proyek tersimpan', `"${nama}" disimpan.`);
             } catch (e: any) {
               const code = e?.code || e?.message || e;
               console.log('[Firestore error]', code);
-              Alert.alert('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan proyek.'));
+              peringatan('Gagal menyimpan', String(code || 'Terjadi kesalahan saat menyimpan proyek.'));
             }
           }}
           onBatal={() => setModalVisible(false)}
@@ -958,3 +967,4 @@ export default function EditorScreen({ onCalculate, onOpenPrices, onOpenProjects
     </View>
   );
 }
+
