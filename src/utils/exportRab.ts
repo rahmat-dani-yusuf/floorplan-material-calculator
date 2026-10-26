@@ -114,7 +114,7 @@ export function buildMultiFloorRabHtml(projectName: string, multi: MultiFloorSum
     const rows = f.summary.line_items.map((item) =>
       `<tr><td>${escapeHtml(item.name)}</td><td style="text-align:right">${item.quantity.toLocaleString('id-ID')}</td><td>${escapeHtml(item.unit)}</td><td style="text-align:right">${formatRupiah(item.unit_price)}</td><td style="text-align:right">${formatRupiah(item.subtotal)}</td></tr>`,
     ).join('');
-    return `<h2 style="font-size:16px;margin-top:16px;">${escapeHtml(f.floorName)} â€” ${f.summary.total_area_m2.toFixed(2)} mآ²</h2>
+    return `<h2 style="font-size:16px;margin-top:16px;">${escapeHtml(f.floorName)} &mdash; ${f.summary.total_area_m2.toFixed(2)} mآ&sup2;</h2>
 <table>
 <thead><tr><th>Item</th><th>Jumlah</th><th>Satuan</th><th>Harga satuan</th><th>Subtotal</th></tr></thead>
 <tbody>${rows}<tr class="total-row"><td colspan="4">TOTAL ${escapeHtml(f.floorName)}</td><td class="number">${formatRupiah(f.summary.grand_total)}</td></tr></tbody>
@@ -124,6 +124,7 @@ export function buildMultiFloorRabHtml(projectName: string, multi: MultiFloorSum
 <html>
 <head>
 <meta charset="utf-8">
+<title>RAB - ${name}</title>
 <style>
 body { font-family: sans-serif; color: #111; padding: 24px; max-width: 720px; margin: auto; }
 h1 { font-size: 22px; margin-bottom: 4px; }
@@ -138,9 +139,9 @@ th { background: #131b2e; color: #fff; }
 </head>
 <body>
 <h1>RAB MATERIAL DINDING (MULTI-LANTAI)</h1>
-<div class="info">Proyek: ${name} | Tanggal: ${today} | Luas netto: ${multi.total_area_m2.toFixed(2)} mآ² | Grand total: ${formatRupiah(multi.grand_total)}</div>
+<div class="info">Proyek: ${name} | Tanggal: ${today} | Luas netto: ${multi.total_area_m2.toFixed(2)} mآ&sup2; | Grand total: ${formatRupiah(multi.grand_total)}</div>
 ${sections}
-<div class="footer">Dibuat dengan aplikasi Kalkulator Material â€¢ Estimasi sudah termasuk waste 5%</div>
+<div class="footer">Dibuat dengan aplikasi Kalkulator Material &bull; Estimasi sudah termasuk waste 5%</div>
 </body>
 </html>`;
 }
