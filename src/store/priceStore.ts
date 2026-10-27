@@ -24,6 +24,22 @@ interface PriceStore {
 
 const sanitize = (v: number) => (Number.isFinite(v) && v >= 0 ? Math.round(v) : 0);
 
+// Kunci penyimpanan harga pribadi dipisah per pengguna agar harga akun A
+// tidak terbawa ke akun B di browser/perangkat yang sama.
+const priceStorageKey = (): string => {
+  const s = useAuthStore.getState();
+  if (s.isGuest) return 'prices-v2-guest';
+  return s.user?.uid ? `prices-v2-${s.user.uid}` : 'prices-v2-anonymous';
+};
+
+const priceStorage = createJSONStorage(() => ({
+  getItem: async (_name: string) => AsyncStorage.getItem(priceStorageKey()),
+  setItem: async (_name: string, value: string) =>
+    AsyncStorage.setItem(priceStorageKey(), value),
+  removeItem: async (_name: string) =>
+    AsyncStorage.removeItem(priceStorageKey()),
+}));
+
 export const usePriceStore = create<PriceStore>()(
   persist(
     (set, get) => {
@@ -74,7 +90,7 @@ export const usePriceStore = create<PriceStore>()(
     },
     {
       name: 'floorplan-prices',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: priceStorage,
       // Harga lokal per-akun & flag penyesuaian dipersist seperti sekarang.
       partialize: (s) => ({ prices: s.prices, userAdjustedPrices: s.userAdjustedPrices }),
     },
@@ -84,12 +100,34 @@ export const usePriceStore = create<PriceStore>()(
 // Ambil harga pasar saat app mulai (harga global bisa dibaca siapa saja).
 usePriceStore.getState().loadMarketPrices();
 
-// Ambil ulang saat status auth berubah (login/logout/guest).
+// Ambil ulang saat status auth berubah (login/logout/daftar).
+// Muat harga tersimpan milik pengguna baru dari kunci miliknya sendiri,
+// sehingga harga pribadi pengguna sebelumnya tidak bocor ke pengguna berikutnya.
 useAuthStore.subscribe((s, prev) => {
   const uidChanged = s.user?.uid !== prev?.user?.uid;
   const guestChanged = s.isGuest !== prev?.isGuest;
-  if (uidChanged || guestChanged) {
-    usePriceStore.getState().loadMarketPrices();
-  }
+  if (!uidChanged && !guestChanged) return;
+  void rehydratePricesOnAuthChange();
 });
+
+async function rehydratePricesOnAuthChange(): Promise<void> {
+  const raw = await AsyncStorage.getItem(priceStorageKey());
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as {
+        prices?: UnitPrices;
+        userAdjustedPrices?: boolean;
+      };
+      usePriceStore.setState({
+        prices: parsed.prices ?? DEFAULT_PRICES,
+        userAdjustedPrices: parsed.userAdjustedPrices ?? false,
+      });
+    } catch {
+      usePriceStore.getState().resetPrices();
+    }
+  } else {
+    usePriceStore.getState().resetPrices();
+  }
+  usePriceStore.getState().loadMarketPrices();
+}
 

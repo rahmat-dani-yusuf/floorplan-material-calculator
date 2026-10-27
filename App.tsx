@@ -35,6 +35,7 @@ export default function App() {
   const goBackToOrigin = () => setScreen(fromScreen);
   const openAdminPrices = () => setScreen('adminPrices');
   const backToPrices = () => setScreen('prices');
+  const backToProjects = () => setScreen('projects');
   const handleSelectProject = (id: string) => {
     useProjectStore.getState().openProject(id);
     setScreen('editor');
@@ -50,7 +51,7 @@ export default function App() {
       ) : screen === 'prices' ? (
         <PriceSettingsScreen onBack={goBackToOrigin} onOpenAdmin={openAdminPrices} />
       ) : screen === 'adminPrices' ? (
-        <AdminPriceScreen onBack={backToPrices} />
+        <AdminPriceScreen onBack={auth.isAdmin ? backToPrices : backToProjects} />
       ) : (
         <ProjectsScreen onBack={goBackToOrigin} onSelect={handleSelectProject} />
       )}

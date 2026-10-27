@@ -84,19 +84,14 @@ export default function AdminPriceScreen({ onBack }: { onBack: () => void }) {
     return () => { alive = false; };
   }, []);
 
-  if (!isAdmin) {
-    return (
-      <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-        <Pressable onPress={onBack} style={{ position: 'absolute', left: 16, top: 48 }}>
-          <Text style={{ color: C.secondary, fontSize: 14 }}>← Kembali</Text>
-        </Pressable>
-        <Text style={{ color: C.error, fontSize: 18, fontWeight: '700' }}>Khusus admin</Text>
-        <Text style={{ color: C.secondary, fontSize: 13, marginTop: 8, textAlign: 'center' }}>
-          Hanya admin yang dapat mengatur harga pasar.
-        </Text>
-      </View>
-    );
-  }
+  useEffect(() => {
+    if (!isAdmin) {
+      peringatan('Khusus admin', 'Hanya admin yang dapat mengakses harga pasar.');
+      onBack();
+    }
+  }, [isAdmin, onBack]);
+
+  if (!isAdmin) return null;
 
   const handleChange = (key: string, text: string) => {
     const digits = text.replace(/[^0-9]/g, '');

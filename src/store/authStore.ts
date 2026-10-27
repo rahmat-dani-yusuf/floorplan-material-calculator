@@ -33,9 +33,12 @@ export const useAuthStore = create<AuthState>()(
       enterGuest: () => set({ user: null, isGuest: true, ready: true, isAdmin: false }),
       setUserFromFirebase: (fb) => {
         if (fb) {
-          set({ user: { uid: fb.uid, nama: fb.displayName || null, email: fb.email || null }, isGuest: false, ready: true });
-          checkIsAdmin(fb.uid)
-            .then((admin) => set({ isAdmin: admin }))
+          const uid = fb.uid;
+          set({ user: { uid, nama: fb.displayName || null, email: fb.email || null }, isGuest: false, ready: true, isAdmin: false });
+          checkIsAdmin(uid)
+            .then((admin) => {
+              if (useAuthStore.getState().user?.uid === uid) set({ isAdmin: admin });
+            })
             .catch(() => set({ isAdmin: false }));
         } else {
           set({ user: null, isGuest: false, ready: true, isAdmin: false });
