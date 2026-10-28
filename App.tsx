@@ -51,7 +51,7 @@ export default function App() {
       ) : screen === 'prices' ? (
         <PriceSettingsScreen onBack={goBackToOrigin} onOpenAdmin={openAdminPrices} />
       ) : screen === 'adminPrices' ? (
-        <AdminPriceScreen onBack={auth.isAdmin ? backToPrices : backToProjects} />
+        <AdminPriceScreen onBack={backToPrices} />
       ) : (
         <ProjectsScreen onBack={goBackToOrigin} onSelect={handleSelectProject} />
       )}
